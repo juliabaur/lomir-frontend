@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Circle,
   MapContainer,
@@ -11,19 +11,29 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
+  Calendar,
+  Crown,
+  EyeClosed,
+  EyeIcon,
   FlaskConical,
   Globe,
+  Mail,
   MapPin,
   MapPinX,
   Ruler,
+  SendHorizontal,
+  ShieldCheck,
   Users,
   User,
   UserSearch,
   X,
 } from "lucide-react";
+import { format } from "date-fns";
 import VacantRoleDetailsModal from "../teams/VacantRoleDetailsModal";
 import { useTeamModalSafe } from "../../contexts/TeamModalContext";
 import { useUserModalSafe } from "../../contexts/UserModalContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { teamService } from "../../services/teamService";
 import { getResultMatchScore } from "../../utils/teamMatchUtils";
 import {
   getTeamInitials,
@@ -86,6 +96,14 @@ const firstPresent = (...values) =>
 
 const normalizeLocationKey = (value) => String(value ?? "").trim().toLowerCase();
 
+const normalizeRoleValue = (value) => {
+  const role = String(value ?? "").trim().toLowerCase();
+  return ["owner", "admin", "member"].includes(role) ? role : null;
+};
+
+const isTruthyValue = (value) =>
+  value === true || value === 1 || value === "true" || value === "1";
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -132,6 +150,17 @@ const getDisplayName = (item, type) => {
   const lastName = item.last_name || item.lastName || "";
   return [firstName, lastName].filter(Boolean).join(" ") || item.username || "Person";
 };
+
+const getMapPointType = (item) =>
+  item._resultType === "team" || item._resultType === "user" || item._resultType === "role"
+    ? item._resultType
+    : item.roleName || item.role_name
+      ? "role"
+      : item.first_name || item.firstName || item.username
+        ? "user"
+        : "team";
+
+const getTeamItemId = (item) => firstPresent(item?.id, item?.teamId, item?.team_id);
 
 const getItemCity = (item) =>
   firstPresent(
@@ -199,6 +228,77 @@ const getCityCoordinateFallback = (item) =>
 const getItemMaxDistanceKm = (item) =>
   toNumber(firstPresent(item?.maxDistanceKm, item?.max_distance_km, item?.role?.maxDistanceKm, item?.role?.max_distance_km));
 
+const getTeamMemberCount = (item) => {
+  const count = firstPresent(
+    item?.current_members_count,
+    item?.currentMembersCount,
+    item?.member_count,
+    item?.memberCount,
+    item?.members_count,
+    item?.membersCount,
+    Array.isArray(item?.members) ? item.members.length : null,
+  );
+
+  return toNumber(count) ?? 0;
+};
+
+const getTeamMaxMembers = (item) =>
+  firstPresent(item?.max_members, item?.maxMembers) ?? "∞";
+
+const getTeamOpenRoleCount = (item) => {
+  const count = firstPresent(
+    item?.open_role_count,
+    item?.openRoleCount,
+    item?.open_roles_count,
+    item?.openRolesCount,
+    item?.vacant_role_count,
+    item?.vacantRoleCount,
+    item?.vacant_roles_count,
+    item?.vacantRolesCount,
+    Array.isArray(item?.openRoles) ? item.openRoles.length : null,
+    Array.isArray(item?.open_roles) ? item.open_roles.length : null,
+    Array.isArray(item?.vacantRoles) ? item.vacantRoles.length : null,
+    Array.isArray(item?.vacant_roles) ? item.vacant_roles.length : null,
+  );
+
+  return toNumber(count) ?? 0;
+};
+
+const getTeamViewerRole = (item, viewerUser = null) => {
+  if (!item || !viewerUser?.id) return null;
+
+  if (String(item.owner_id ?? item.ownerId ?? "") === String(viewerUser.id)) {
+    return "owner";
+  }
+
+  const directRole = normalizeRoleValue(firstPresent(
+    item.currentUserRole,
+    item.current_user_role,
+    item.userRole,
+    item.user_role,
+    item.viewerRole,
+    item.viewer_role,
+    item.membershipRole,
+    item.membership_role,
+  ));
+
+  if (directRole) return directRole;
+
+  if (Array.isArray(item.members)) {
+    const viewerMember = item.members.find(
+      (member) =>
+        String(member.user_id ?? member.userId ?? member.id ?? "") === String(viewerUser.id),
+    );
+
+    return normalizeRoleValue(viewerMember?.role);
+  }
+
+  return null;
+};
+
+const getTeamIsPublic = (item) =>
+  isTruthyValue(firstPresent(item?.is_public, item?.isPublic));
+
 const coordinatesMatchCountry = (lat, lng, countryCode) => {
   if (!countryCode) return true;
   const bounds = COUNTRY_COORDINATE_BOUNDS[countryCode];
@@ -225,6 +325,77 @@ const getDistanceLabel = (item) => {
   if (distance < 1) return `${distance.toFixed(1)} km away`;
   return `${Math.round(distance)} km away`;
 };
+
+const INACTIVE_APPLICATION_STATUSES = new Set(["withdrawn", "rejected", "declined", "cancelled", "canceled"]);
+const INACTIVE_INVITATION_STATUSES = new Set(["withdrawn", "revoked", "declined", "cancelled", "canceled"]);
+
+const getRoleHasApplied = (item) => {
+  if (isTruthyValue(firstPresent(
+    item.hasAppliedToRole, item.has_applied_to_role,
+    item.hasApplied, item.has_applied,
+    item.isApplied, item.is_applied,
+    item.viewerHasApplied, item.viewer_has_applied,
+    item.hasPendingApplication, item.has_pending_application,
+    item.hasPendingRoleApplication, item.has_pending_role_application,
+    item.isPendingApplication, item.is_pending_application,
+    item.currentUserHasApplied, item.current_user_has_applied,
+  ))) return true;
+  const appObj = firstPresent(
+    item.currentUserRoleApplication, item.current_user_role_application,
+    item.currentUserApplication, item.current_user_application,
+    item.pendingRoleApplication, item.pending_role_application,
+    item.pendingApplication, item.pending_application,
+    item.roleApplication, item.role_application,
+    item.application,
+  );
+  if (appObj) {
+    const status = String(appObj.status ?? appObj.applicationStatus ?? appObj.application_status ?? "").toLowerCase();
+    return status !== "" && !INACTIVE_APPLICATION_STATUSES.has(status);
+  }
+  return false;
+};
+
+const getRoleHasInvitation = (item) => {
+  if (isTruthyValue(firstPresent(
+    item.hasRoleInvitation, item.has_role_invitation,
+    item.hasInvitationToRole, item.has_invitation_to_role,
+    item.hasInvitation, item.has_invitation,
+    item.isInvitedToRole, item.is_invited_to_role,
+    item.viewerHasInvitation, item.viewer_has_invitation,
+    item.currentUserHasInvitation, item.current_user_has_invitation,
+  ))) return true;
+  const invObj = firstPresent(
+    item.currentUserRoleInvitation, item.current_user_role_invitation,
+    item.currentUserInvitation, item.current_user_invitation,
+    item.pendingRoleInvitation, item.pending_role_invitation,
+    item.pendingInvitation, item.pending_invitation,
+    item.roleInvitation, item.role_invitation,
+    item.invitation,
+  );
+  if (invObj) {
+    const status = String(invObj.status ?? invObj.invitationStatus ?? invObj.invitation_status ?? "").toLowerCase();
+    return status !== "" && !INACTIVE_INVITATION_STATUSES.has(status);
+  }
+  return false;
+};
+
+const getRoleIsViewerTeamMember = (item) => {
+  if (isTruthyValue(firstPresent(
+    item.isTeamMember, item.is_team_member,
+    item.isCurrentUserTeamMember,
+    item.viewerIsTeamMember, item.viewer_is_team_member,
+    item.memberOfTeam, item.member_of_team,
+    item.currentUserIsTeamMember, item.current_user_is_team_member,
+  ))) return true;
+  return normalizeRoleValue(firstPresent(
+    item.userRole, item.user_role,
+    item.viewerRole, item.viewer_role,
+    item.currentUserRole, item.current_user_role,
+  )) !== null;
+};
+
+const getRolePostedAt = (item) =>
+  firstPresent(item.postedAt, item.posted_at, item.createdAt, item.created_at);
 
 const getRoleInitials = (item) => {
   const name = item.roleName ?? item.role_name ?? item.title ?? "Vacant Role";
@@ -308,17 +479,22 @@ const buildMarkerIcon = (point) => {
   });
 };
 
-const normalizeMapPoint = (item) => {
+const matchesRoleItem = (entry, roleRawId, roleTeamId, roleNameStr) => {
+  const entryRoleId = entry.role?.id ?? entry.roleId ?? entry.role_id ?? null;
+  if (entryRoleId != null && roleRawId != null && String(entryRoleId) === String(roleRawId)) return true;
+  const entryTeamId = entry.team?.id ?? entry.teamId ?? entry.team_id ?? null;
+  const entryRoleName = entry.role?.roleName ?? entry.role?.role_name ?? entry.roleName ?? entry.role_name ?? null;
+  return (
+    roleTeamId != null && entryTeamId != null && String(entryTeamId) === String(roleTeamId) &&
+    typeof entryRoleName === "string" && typeof roleNameStr === "string" &&
+    entryRoleName.trim().toLowerCase() === roleNameStr.trim().toLowerCase()
+  );
+};
+
+const normalizeMapPoint = (item, viewerUser = null, fetchedTeamRoles = {}, fetchedApplications = [], fetchedInvitations = []) => {
   if (!item) return null;
 
-  const type =
-    item._resultType === "team" || item._resultType === "user" || item._resultType === "role"
-      ? item._resultType
-      : item.roleName || item.role_name
-        ? "role"
-        : item.first_name || item.firstName || item.username
-          ? "user"
-          : "team";
+  const type = getMapPointType(item);
   const lat = toNumber(firstPresent(
     item.latitude,
     item.lat,
@@ -353,10 +529,19 @@ const normalizeMapPoint = (item) => {
     rawCoordinatesAreUsable ||
     shouldUseCityCoordinateFallback;
   const avatarData = getAvatarData(item, type);
+  const rawId = type === "team" ? getTeamItemId(item) : item.id ?? item.roleId ?? item.role_id;
+  const fetchedTeamRole =
+    type === "team" && rawId !== undefined && rawId !== null
+      ? fetchedTeamRoles[String(rawId)]
+      : null;
+  const currentUserRole =
+    type === "team"
+      ? normalizeRoleValue(fetchedTeamRole) ?? getTeamViewerRole(item, viewerUser)
+      : null;
 
   return {
-    id: `${type}-${item.id ?? item.roleId ?? item.role_id ?? getDisplayName(item, type)}`,
-    rawId: item.id ?? item.roleId ?? item.role_id,
+    id: `${type}-${rawId ?? getDisplayName(item, type)}`,
+    rawId,
     type,
     item,
     lat: mapLat,
@@ -369,9 +554,29 @@ const normalizeMapPoint = (item) => {
     maxDistanceKm: getItemMaxDistanceKm(item),
     distanceLabel: shouldUseCityCoordinateFallback ? null : getDistanceLabel(item),
     teamName: item.teamName ?? item.team_name ?? item.team?.name ?? null,
+    memberCount: type === "team" ? getTeamMemberCount(item) : null,
+    maxMembers: type === "team" ? getTeamMaxMembers(item) : null,
+    openRoleCount: type === "team" ? getTeamOpenRoleCount(item) : null,
+    currentUserRole,
+    isPublic: type === "team" ? getTeamIsPublic(item) : null,
     imageUrl: avatarData.imageUrl,
     initials: avatarData.initials,
     isDemo: isDemoPoint(item, type),
+    username: type === "user" ? (item.username ?? null) : null,
+    isPublicProfile: type === "user" ? isTruthyValue(firstPresent(item?.is_public, item?.isPublic)) : null,
+    isOwnProfile: type === "user" && rawId != null && viewerUser?.id != null
+      ? String(rawId) === String(viewerUser.id)
+      : false,
+    postedAt: type === "role" ? getRolePostedAt(item) : null,
+    hasApplied: type === "role" ? (
+      getRoleHasApplied(item) ||
+      fetchedApplications.some((app) => matchesRoleItem(app, rawId, item.teamId ?? item.team_id ?? item.team?.id, getDisplayName(item, "role")))
+    ) : false,
+    hasInvitation: type === "role" ? (
+      getRoleHasInvitation(item) ||
+      fetchedInvitations.some((inv) => matchesRoleItem(inv, rawId, item.teamId ?? item.team_id ?? item.team?.id, getDisplayName(item, "role")))
+    ) : false,
+    isViewerTeamMember: type === "role" ? getRoleIsViewerTeamMember(item) : false,
   };
 };
 
@@ -414,13 +619,13 @@ const MarkerTooltipContent = ({ point }) => {
   );
 };
 
-const PopupAvatar = ({ point }) => {
+const PopupAvatar = ({ point, backgroundColor = null }) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
 
   return (
     <span
       className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
-      style={{ backgroundColor: meta.color }}
+      style={{ backgroundColor: backgroundColor ?? meta.color }}
       aria-hidden="true"
     >
       <span>{point.initials}</span>
@@ -481,11 +686,6 @@ const PopupDemoIcon = ({ point }) => {
   );
 };
 
-const BreakableName = ({ name }) => {
-  const words = name.trim().split(/\s+/);
-  if (words.length < 2) return <>{name}</>;
-  return <>{words[0]}<br />{words.slice(1).join(" ")}</>;
-};
 
 const EntityMetaLine = ({ point }) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
@@ -563,11 +763,128 @@ const LocationStatusIndicator = ({ point }) => {
   );
 };
 
+const TeamMetaItem = ({ tooltip = null, children, withTooltip = true }) => {
+  if (!withTooltip || !tooltip) {
+    return <span className="inline-flex items-center gap-0.5">{children}</span>;
+  }
+
+  return (
+    <Tooltip content={tooltip}>
+      <span className="inline-flex items-center gap-0.5">{children}</span>
+    </Tooltip>
+  );
+};
+
+const TeamRoleIcon = ({ role, size = 13 }) => {
+  if (role === "owner") {
+    return <Crown size={size} className="text-[var(--color-role-owner-bg)]" aria-hidden="true" />;
+  }
+
+  if (role === "admin") {
+    return <ShieldCheck size={size} className="text-[var(--color-role-admin-bg)]" aria-hidden="true" />;
+  }
+
+  if (role === "member") {
+    return <User size={size} className="text-[var(--color-role-member-bg)]" aria-hidden="true" />;
+  }
+
+  return null;
+};
+
+const getTeamRoleTooltip = (role) => {
+  if (role === "owner") return "You are the owner of this team";
+  if (role === "admin") return "You are an admin of this team";
+  if (role === "member") return "You are a member of this team";
+  return null;
+};
+
+const TeamMetaLine = ({ point, withTooltips = true }) => {
+  if (point.type !== "team") return null;
+
+  const memberLabel = `${point.memberCount}/${point.maxMembers}`;
+  const roleTooltip = getTeamRoleTooltip(point.currentUserRole);
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-base-content/60">
+      <TeamMetaItem tooltip={`${point.memberCount} of ${point.maxMembers} members`} withTooltip={withTooltips}>
+        <Users size={12} className={point.currentUserRole ? "text-success" : ""} aria-hidden="true" />
+        <span>{memberLabel}</span>
+      </TeamMetaItem>
+      {point.openRoleCount > 0 && (
+        <TeamMetaItem
+          tooltip={`${point.openRoleCount} open ${point.openRoleCount === 1 ? "role" : "roles"} posted in this team`}
+          withTooltip={withTooltips}
+        >
+          <UserSearch size={12} className="text-orange-500" aria-hidden="true" />
+          <span>{point.openRoleCount}</span>
+        </TeamMetaItem>
+      )}
+      {point.currentUserRole && (
+        <TeamMetaItem tooltip={roleTooltip} withTooltip={withTooltips}>
+          <TeamRoleIcon role={point.currentUserRole} size={12} />
+        </TeamMetaItem>
+      )}
+      {point.currentUserRole && (
+        <TeamMetaItem
+          tooltip={
+            point.isPublic
+              ? "Public Team - visible for everyone"
+              : "Private Team - only visible for Members"
+          }
+          withTooltip={withTooltips}
+        >
+          {point.isPublic ? (
+            <EyeIcon size={12} className="text-green-600" aria-hidden="true" />
+          ) : (
+            <EyeClosed size={12} className="text-gray-500" aria-hidden="true" />
+          )}
+        </TeamMetaItem>
+      )}
+    </div>
+  );
+};
+
+const RoleSubline = ({ point }) => {
+  if (point.type !== "role") return null;
+
+  const postedDate = point.postedAt ? new Date(point.postedAt) : null;
+  const isValidDate = postedDate && !isNaN(postedDate);
+
+  if (!isValidDate && !point.hasApplied && !point.hasInvitation) return null;
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-base-content/60">
+      {isValidDate && (
+        <Tooltip content={`Posted ${format(postedDate, "MMM d, yyyy")}`}>
+          <span className="inline-flex items-center gap-1">
+            <Calendar size={12} aria-hidden="true" />
+            <span>{format(postedDate, "MM/dd/yy")}</span>
+          </span>
+        </Tooltip>
+      )}
+      {point.hasApplied && (
+        <Tooltip content="You applied for this role">
+          <span className="inline-flex">
+            <SendHorizontal size={12} className="text-orange-500" aria-hidden="true" />
+          </span>
+        </Tooltip>
+      )}
+      {point.hasInvitation && (
+        <Tooltip content="You were invited to fill this role">
+          <span className="inline-flex">
+            <Mail size={12} className="text-orange-500" aria-hidden="true" />
+          </span>
+        </Tooltip>
+      )}
+    </div>
+  );
+};
+
 const MapPopupCard = ({ point, onOpenPoint }) => {
   const map = useMap();
 
   return (
-    <div className="inline-block max-w-60 align-top">
+    <div className="inline-block max-w-80 align-top">
       <div className="mb-2 flex items-center justify-between text-base-content/70">
         <EntityMetaLine point={point} />
         <button
@@ -581,18 +898,35 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
       </div>
 
       <div className="flex items-center gap-2">
-        <PopupAvatar point={point} />
+        <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
         <div className="min-w-0 flex-1">
           <h3 className="line-clamp-2 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
-            <BreakableName name={point.name} />
+            {point.name}
           </h3>
+          {point.type === "user" && (point.username || point.isOwnProfile) && (
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-base-content/60">
+              {point.username && <span>@{point.username}</span>}
+              {point.isOwnProfile && (
+                <Tooltip content={point.isPublicProfile ? "Public Profile - visible for everyone" : "Private Profile - only visible for you"}>
+                  <span className="inline-flex">
+                    {point.isPublicProfile
+                      ? <EyeIcon size={12} className="text-green-600" aria-hidden="true" />
+                      : <EyeClosed size={12} className="text-gray-500" aria-hidden="true" />
+                    }
+                  </span>
+                </Tooltip>
+              )}
+            </div>
+          )}
+          <TeamMetaLine point={point} />
+          <RoleSubline point={point} />
         </div>
       </div>
 
       <div className="mt-3 space-y-0.5 text-xs text-base-content/70">
         {point.teamName && (
-          <div className="flex items-center gap-1.5">
-            <Users size={13} />
+          <div className={`flex items-center gap-1.5 ${point.type === "role" && point.isViewerTeamMember ? "text-success" : ""}`}>
+            <Users size={13} aria-hidden="true" />
             <span>{point.teamName}</span>
           </div>
         )}
@@ -637,12 +971,94 @@ const SearchMapView = ({
 }) => {
   const teamModal = useTeamModalSafe();
   const userModal = useUserModalSafe();
+  const authContext = useAuth();
+  const authUserId = authContext?.user?.id ?? null;
   const [selectedRolePoint, setSelectedRolePoint] = useState(null);
   const [activeStatusTooltipPointId, setActiveStatusTooltipPointId] = useState(null);
+  const [fetchedTeamRoles, setFetchedTeamRoles] = useState({});
+  const [fetchedApplications, setFetchedApplications] = useState([]);
+  const [fetchedInvitations, setFetchedInvitations] = useState([]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+
+    let isActive = true;
+
+    const fetchUserRoleData = async () => {
+      try {
+        const [appsResponse, invResponse] = await Promise.all([
+          teamService.getUserPendingApplications(),
+          teamService.getUserReceivedInvitations(),
+        ]);
+        if (!isActive) return;
+        setFetchedApplications(Array.isArray(appsResponse?.data) ? appsResponse.data : []);
+        setFetchedInvitations(Array.isArray(invResponse?.data) ? invResponse.data : []);
+      } catch {
+        // silent fail — icon simply won't show if fetch fails
+      }
+    };
+
+    fetchUserRoleData();
+
+    return () => { isActive = false; };
+  }, [authUserId]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+
+    const seenTeamIds = new Set();
+
+    const teamItemsNeedingRole = items.filter((item) => {
+      if (getMapPointType(item) !== "team") return false;
+      const teamId = getTeamItemId(item);
+      if (teamId === null) return false;
+      const teamKey = String(teamId);
+      if (seenTeamIds.has(teamKey)) return false;
+      seenTeamIds.add(teamKey);
+      if (Object.prototype.hasOwnProperty.call(fetchedTeamRoles, teamKey)) return false;
+      return !getTeamViewerRole(item, { id: authUserId });
+    });
+
+    if (teamItemsNeedingRole.length === 0) return;
+
+    let isActive = true;
+
+    const fetchTeamRoles = async () => {
+      const entries = await Promise.all(
+        teamItemsNeedingRole.map(async (teamItem) => {
+          const teamId = getTeamItemId(teamItem);
+          const response = await teamService.getUserRoleInTeam(teamId, authUserId);
+          const payload = response?.data ?? response;
+          const data = payload?.data ?? payload;
+
+          return [String(teamId), normalizeRoleValue(data?.role ?? payload?.role)];
+        }),
+      );
+
+      if (!isActive) return;
+
+      setFetchedTeamRoles((previousRoles) => {
+        const nextRoles = { ...previousRoles };
+        entries.forEach(([teamId, role]) => {
+          nextRoles[teamId] = role;
+        });
+        return nextRoles;
+      });
+    };
+
+    fetchTeamRoles();
+
+    return () => {
+      isActive = false;
+    };
+  }, [authUserId, fetchedTeamRoles, items]);
 
   const normalizedPoints = useMemo(
-    () => items.map(normalizeMapPoint).filter(Boolean),
-    [items],
+    () =>
+      items
+        .map((item) => normalizeMapPoint(item, { id: authUserId }, fetchedTeamRoles, fetchedApplications, fetchedInvitations))
+        .filter(Boolean),
+    [authUserId, fetchedTeamRoles, fetchedApplications, fetchedInvitations, items],
   );
   const markerPoints = normalizedPoints.filter((point) => point.hasCoordinates);
   const fallbackPoints = normalizedPoints.filter((point) => !point.hasCoordinates);
@@ -748,7 +1164,7 @@ const SearchMapView = ({
                     className="lomir-map-popup"
                     closeButton={false}
                     minWidth={0}
-                    maxWidth={260}
+                    maxWidth={320}
                   >
                     <MapPopupCard point={point} onOpenPoint={openPoint} />
                   </Popup>
@@ -826,14 +1242,18 @@ const SearchMapView = ({
                           </span>
                         </div>
                         <div className="mt-1 flex items-center gap-1.5">
-                          <PopupAvatar point={point} />
-                          <h5 className="line-clamp-2 min-w-0 flex-1 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
-                            <BreakableName name={point.name} />
-                          </h5>
+                          <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
+                          <div className="min-w-0 flex-1">
+                            <h5 className="line-clamp-2 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
+                              {point.name}
+                            </h5>
+                            <TeamMetaLine point={point} withTooltips={false} />
+                            <RoleSubline point={point} />
+                          </div>
                         </div>
-                        {point.type === "role" && point.teamName && (
-                          <div className="mt-3 flex items-center gap-1.5 text-xs text-base-content/70">
-                            <Users size={13} />
+                        {point.teamName && (
+                          <div className={`mt-2 flex items-center gap-1.5 text-xs ${point.type === "role" && point.isViewerTeamMember ? "text-success" : "text-base-content/70"}`}>
+                            <Users size={13} aria-hidden="true" />
                             <span className="min-w-0 flex-1 truncate">{point.teamName}</span>
                           </div>
                         )}
