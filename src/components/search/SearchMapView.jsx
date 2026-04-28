@@ -69,7 +69,7 @@ const TYPE_META = {
 
 const DEFAULT_CENTER = [51.1657, 10.4515];
 const LOCATION_NOT_AVAILABLE = "Location not available";
-const POPUP_SUBLINE_ICON_SIZE = 12;
+const POPUP_SUBLINE_ICON_SIZE = 10;
 const POPUP_SUBLINE_ICON_CLASS = "inline-flex h-3 w-3 items-center justify-center";
 const COUNTRY_COORDINATE_BOUNDS = {
   DE: { minLat: 47.2, maxLat: 55.2, minLng: 5.7, maxLng: 15.1 },
@@ -624,7 +624,7 @@ const PopupAvatar = ({ point, backgroundColor = null }) => {
 
   return (
     <span
-      className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
       style={{ backgroundColor: backgroundColor ?? meta.color }}
       aria-hidden="true"
     >
@@ -805,9 +805,9 @@ const TeamMetaLine = ({ point, withTooltips = true }) => {
   const roleTooltip = getTeamRoleTooltip(point.currentUserRole);
 
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-base-content/60">
+    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
       <TeamMetaItem tooltip={`${point.memberCount} of ${point.maxMembers} members`} withTooltip={withTooltips}>
-        <Users size={12} className={point.currentUserRole ? "text-success" : ""} aria-hidden="true" />
+        <Users size={10} className={point.currentUserRole ? "text-success" : ""} aria-hidden="true" />
         <span>{memberLabel}</span>
       </TeamMetaItem>
       {point.openRoleCount > 0 && (
@@ -815,13 +815,13 @@ const TeamMetaLine = ({ point, withTooltips = true }) => {
           tooltip={`${point.openRoleCount} open ${point.openRoleCount === 1 ? "role" : "roles"} posted in this team`}
           withTooltip={withTooltips}
         >
-          <UserSearch size={12} className="text-orange-500" aria-hidden="true" />
+          <UserSearch size={10} className="text-orange-500" aria-hidden="true" />
           <span>{point.openRoleCount}</span>
         </TeamMetaItem>
       )}
       {point.currentUserRole && (
         <TeamMetaItem tooltip={roleTooltip} withTooltip={withTooltips}>
-          <TeamRoleIcon role={point.currentUserRole} size={12} />
+          <TeamRoleIcon role={point.currentUserRole} size={10} />
         </TeamMetaItem>
       )}
       {point.currentUserRole && (
@@ -834,11 +834,32 @@ const TeamMetaLine = ({ point, withTooltips = true }) => {
           withTooltip={withTooltips}
         >
           {point.isPublic ? (
-            <EyeIcon size={12} className="text-green-600" aria-hidden="true" />
+            <EyeIcon size={10} className="text-green-600" aria-hidden="true" />
           ) : (
-            <EyeClosed size={12} className="text-gray-500" aria-hidden="true" />
+            <EyeClosed size={10} className="text-gray-500" aria-hidden="true" />
           )}
         </TeamMetaItem>
+      )}
+    </div>
+  );
+};
+
+const UserSubline = ({ point }) => {
+  if (point.type !== "user") return null;
+  if (!point.username && !point.isOwnProfile) return null;
+
+  return (
+    <div className="mt-0.5 flex items-center gap-0.5 text-[11px] font-medium text-base-content/60">
+      {point.username && <span>@{point.username}</span>}
+      {point.isOwnProfile && (
+        <Tooltip content={point.isPublicProfile ? "Public Profile - visible for everyone" : "Private Profile - only visible for you"}>
+          <span className="inline-flex">
+            {point.isPublicProfile
+              ? <EyeIcon size={10} className="text-green-600" aria-hidden="true" />
+              : <EyeClosed size={10} className="text-gray-500" aria-hidden="true" />
+            }
+          </span>
+        </Tooltip>
       )}
     </div>
   );
@@ -853,11 +874,11 @@ const RoleSubline = ({ point }) => {
   if (!isValidDate && !point.hasApplied && !point.hasInvitation) return null;
 
   return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] font-medium text-base-content/60">
+    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
       {isValidDate && (
         <Tooltip content={`Posted ${format(postedDate, "MMM d, yyyy")}`}>
           <span className="inline-flex items-center gap-1">
-            <Calendar size={12} aria-hidden="true" />
+            <Calendar size={10} aria-hidden="true" />
             <span>{format(postedDate, "MM/dd/yy")}</span>
           </span>
         </Tooltip>
@@ -865,14 +886,14 @@ const RoleSubline = ({ point }) => {
       {point.hasApplied && (
         <Tooltip content="You applied for this role">
           <span className="inline-flex">
-            <SendHorizontal size={12} className="text-orange-500" aria-hidden="true" />
+            <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />
           </span>
         </Tooltip>
       )}
       {point.hasInvitation && (
         <Tooltip content="You were invited to fill this role">
           <span className="inline-flex">
-            <Mail size={12} className="text-orange-500" aria-hidden="true" />
+            <Mail size={10} className="text-orange-500" aria-hidden="true" />
           </span>
         </Tooltip>
       )}
@@ -884,7 +905,7 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
   const map = useMap();
 
   return (
-    <div className="inline-block max-w-80 align-top">
+    <div className="inline-block max-w-[22rem] align-top">
       <div className="mb-2 flex items-center justify-between text-base-content/70">
         <EntityMetaLine point={point} />
         <button
@@ -893,31 +914,17 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
           aria-label="Close"
           className="ml-2 flex items-center justify-center text-base-content/40 hover:text-base-content/70"
         >
-          <X size={POPUP_SUBLINE_ICON_SIZE} />
+          <X size={10} />
         </button>
       </div>
 
       <div className="flex items-center gap-2">
         <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
+          <h3 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
             {point.name}
           </h3>
-          {point.type === "user" && (point.username || point.isOwnProfile) && (
-            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-base-content/60">
-              {point.username && <span>@{point.username}</span>}
-              {point.isOwnProfile && (
-                <Tooltip content={point.isPublicProfile ? "Public Profile - visible for everyone" : "Private Profile - only visible for you"}>
-                  <span className="inline-flex">
-                    {point.isPublicProfile
-                      ? <EyeIcon size={12} className="text-green-600" aria-hidden="true" />
-                      : <EyeClosed size={12} className="text-gray-500" aria-hidden="true" />
-                    }
-                  </span>
-                </Tooltip>
-              )}
-            </div>
-          )}
+          <UserSubline point={point} />
           <TeamMetaLine point={point} />
           <RoleSubline point={point} />
         </div>
@@ -1164,7 +1171,7 @@ const SearchMapView = ({
                     className="lomir-map-popup"
                     closeButton={false}
                     minWidth={0}
-                    maxWidth={320}
+                    maxWidth={352}
                   >
                     <MapPopupCard point={point} onOpenPoint={openPoint} />
                   </Popup>
@@ -1190,7 +1197,7 @@ const SearchMapView = ({
                       style={{ backgroundColor: meta.color }}
                       aria-hidden="true"
                     >
-                      <meta.Icon size={12} strokeWidth={2.25} className="block text-white" />
+                      <meta.Icon size={10} strokeWidth={2.25} className="block text-white" />
                     </span>
                     {meta.label}
                   </span>
@@ -1244,9 +1251,10 @@ const SearchMapView = ({
                         <div className="mt-1 flex items-center gap-1.5">
                           <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
                           <div className="min-w-0 flex-1">
-                            <h5 className="line-clamp-2 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
+                            <h5 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
                               {point.name}
                             </h5>
+                            <UserSubline point={point} />
                             <TeamMetaLine point={point} withTooltips={false} />
                             <RoleSubline point={point} />
                           </div>
