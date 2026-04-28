@@ -1039,7 +1039,7 @@ const MessageDisplay = ({
             />
           ) : null}
           <div
-            className="avatar-fallback bg-primary text-primary-content flex items-center justify-center w-full h-full rounded-full absolute inset-0"
+            className="avatar-fallback bg-[var(--color-primary-focus)] text-primary-content flex items-center justify-center w-full h-full rounded-full absolute inset-0"
             style={{ display: teamAvatarUrl ? "none" : "flex" }}
           >
             <span className="text-xl font-medium">

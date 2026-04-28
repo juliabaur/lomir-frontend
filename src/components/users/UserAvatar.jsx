@@ -56,7 +56,7 @@ const UserAvatar = ({
           className={`avatar-fallback flex items-center justify-center w-full h-full rounded-full absolute inset-0 ${
             isFormerUser
               ? "bg-base-300 text-base-content/30"
-              : "bg-primary text-primary-content"
+              : "bg-[var(--color-primary-focus)] text-primary-content"
           }`}
           style={{ display: avatarUrl ? "none" : "flex" }}
         >

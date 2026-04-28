@@ -270,7 +270,7 @@ const ImageUploader = ({
             className={`
               w-full h-full flex items-center justify-center overflow-hidden
               ${shapeClasses[finalShape]}
-              ${hasImage ? "" : "bg-primary text-primary-content"}
+              ${hasImage ? "" : "bg-[var(--color-primary-focus)] text-primary-content"}
             `}
           >
             {loading ? (

@@ -14,6 +14,7 @@ import {
   FlaskConical,
   Globe,
   MapPin,
+  MapPinX,
   Ruler,
   Users,
   User,
@@ -31,6 +32,7 @@ import {
   isSyntheticTeam,
   isSyntheticUser,
 } from "../../utils/userHelpers";
+import { getCountryCode, getCountryDisplayName } from "../../utils/locationUtils";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
 import Tooltip from "../common/Tooltip";
 
@@ -56,13 +58,33 @@ const TYPE_META = {
 };
 
 const DEFAULT_CENTER = [51.1657, 10.4515];
+const LOCATION_NOT_AVAILABLE = "Location not available";
 const POPUP_SUBLINE_ICON_SIZE = 12;
 const POPUP_SUBLINE_ICON_CLASS = "inline-flex h-3 w-3 items-center justify-center";
+const COUNTRY_COORDINATE_BOUNDS = {
+  DE: { minLat: 47.2, maxLat: 55.2, minLng: 5.7, maxLng: 15.1 },
+  FR: { minLat: 41.2, maxLat: 51.2, minLng: -5.6, maxLng: 9.7 },
+};
+const CITY_COUNTRY_FALLBACKS = {
+  berlin: "DE",
+  frankfurt: "DE",
+  "frankfurt am main": "DE",
+};
+const CITY_COORDINATE_FALLBACKS = {
+  berlin: { lat: 52.52, lng: 13.405 },
+  frankfurt: { lat: 50.1109, lng: 8.6821 },
+  "frankfurt am main": { lat: 50.1109, lng: 8.6821 },
+};
 
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+const firstPresent = (...values) =>
+  values.find((value) => value !== undefined && value !== null && value !== "") ?? null;
+
+const normalizeLocationKey = (value) => String(value ?? "").trim().toLowerCase();
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -81,8 +103,21 @@ const isValidCoordinate = (lat, lng) =>
   lng <= 180;
 
 const getLatLng = (item) => {
-  const lat = toNumber(item?.latitude ?? item?.lat);
-  const lng = toNumber(item?.longitude ?? item?.lng ?? item?.lon);
+  const lat = toNumber(firstPresent(
+    item?.latitude,
+    item?.lat,
+    item?.location?.latitude,
+    item?.roleLocation?.latitude,
+    item?.role_location?.latitude,
+  ));
+  const lng = toNumber(firstPresent(
+    item?.longitude,
+    item?.lng,
+    item?.lon,
+    item?.location?.longitude,
+    item?.roleLocation?.longitude,
+    item?.role_location?.longitude,
+  ));
 
   return isValidCoordinate(lat, lng) ? { lat, lng } : null;
 };
@@ -98,15 +133,83 @@ const getDisplayName = (item, type) => {
   return [firstName, lastName].filter(Boolean).join(" ") || item.username || "Person";
 };
 
+const getItemCity = (item) =>
+  firstPresent(
+    item.city,
+    item.location_city,
+    item.locationCity,
+    item.roleCity,
+    item.role_city,
+    item.roleLocation?.city,
+    item.role_location?.city,
+    item.location?.city,
+    item.role?.city,
+  );
+
 const getLocationLabel = (item) => {
   if (item.is_remote ?? item.isRemote) return "Remote";
 
-  const city = item.city || item.location_city;
-  const country = item.country || item.location_country;
-  const state = item.state || item.location_state;
-  const parts = [city, country || state].filter(Boolean);
+  const city = getItemCity(item);
+  const country = firstPresent(
+    item.country,
+    item.location_country,
+    item.locationCountry,
+    item.roleCountry,
+    item.role_country,
+    item.roleLocation?.country,
+    item.role_location?.country,
+    item.location?.country,
+    item.role?.country,
+  );
+  const state = firstPresent(
+    item.state,
+    item.location_state,
+    item.locationState,
+    item.roleState,
+    item.role_state,
+    item.roleLocation?.state,
+    item.role_location?.state,
+    item.location?.state,
+    item.role?.state,
+  );
+  const countryLabel = country
+    ? getCountryDisplayName(getCountryCode(country) ?? country)
+    : null;
+  const parts = [city, state, countryLabel].filter(Boolean);
 
-  return parts.length > 0 ? parts.join(", ") : "Location not available";
+  return parts.length > 0 ? parts.join(", ") : LOCATION_NOT_AVAILABLE;
+};
+
+const getItemCountryCode = (item) =>
+  getCountryCode(firstPresent(
+    item?.country,
+    item?.location_country,
+    item?.locationCountry,
+    item?.roleCountry,
+    item?.role_country,
+    item?.roleLocation?.country,
+    item?.role_location?.country,
+    item?.location?.country,
+    item?.role?.country,
+  )) ?? CITY_COUNTRY_FALLBACKS[normalizeLocationKey(getItemCity(item))] ?? null;
+
+const getCityCoordinateFallback = (item) =>
+  CITY_COORDINATE_FALLBACKS[normalizeLocationKey(getItemCity(item))] ?? null;
+
+const getItemMaxDistanceKm = (item) =>
+  toNumber(firstPresent(item?.maxDistanceKm, item?.max_distance_km, item?.role?.maxDistanceKm, item?.role?.max_distance_km));
+
+const coordinatesMatchCountry = (lat, lng, countryCode) => {
+  if (!countryCode) return true;
+  const bounds = COUNTRY_COORDINATE_BOUNDS[countryCode];
+  if (!bounds) return true;
+
+  return (
+    lat >= bounds.minLat &&
+    lat <= bounds.maxLat &&
+    lng >= bounds.minLng &&
+    lng <= bounds.maxLng
+  );
 };
 
 const getDistanceLabel = (item) => {
@@ -216,10 +319,39 @@ const normalizeMapPoint = (item) => {
         : item.first_name || item.firstName || item.username
           ? "user"
           : "team";
-  const lat = toNumber(item.latitude ?? item.lat);
-  const lng = toNumber(item.longitude ?? item.lng ?? item.lon);
-  const hasCoordinates = isValidCoordinate(lat, lng);
+  const lat = toNumber(firstPresent(
+    item.latitude,
+    item.lat,
+    item.location?.latitude,
+    item.roleLocation?.latitude,
+    item.role_location?.latitude,
+  ));
+  const lng = toNumber(firstPresent(
+    item.longitude,
+    item.lng,
+    item.lon,
+    item.location?.longitude,
+    item.roleLocation?.longitude,
+    item.role_location?.longitude,
+  ));
   const isRemote = Boolean(item.is_remote ?? item.isRemote);
+  const locationLabel = getLocationLabel(item);
+  const countryCode = getItemCountryCode(item);
+  const rawCoordinatesAreUsable =
+    !isRemote &&
+    locationLabel !== LOCATION_NOT_AVAILABLE &&
+    isValidCoordinate(lat, lng) &&
+    coordinatesMatchCountry(lat, lng, countryCode);
+  const cityCoordinateFallback = !isRemote ? getCityCoordinateFallback(item) : null;
+  const shouldUseCityCoordinateFallback =
+    !rawCoordinatesAreUsable &&
+    locationLabel !== LOCATION_NOT_AVAILABLE &&
+    Boolean(cityCoordinateFallback);
+  const mapLat = rawCoordinatesAreUsable ? lat : cityCoordinateFallback?.lat ?? lat;
+  const mapLng = rawCoordinatesAreUsable ? lng : cityCoordinateFallback?.lng ?? lng;
+  const hasCoordinates =
+    rawCoordinatesAreUsable ||
+    shouldUseCityCoordinateFallback;
   const avatarData = getAvatarData(item, type);
 
   return {
@@ -227,13 +359,15 @@ const normalizeMapPoint = (item) => {
     rawId: item.id ?? item.roleId ?? item.role_id,
     type,
     item,
-    lat,
-    lng,
+    lat: mapLat,
+    lng: mapLng,
     hasCoordinates,
     isRemote,
     name: getDisplayName(item, type),
-    locationLabel: getLocationLabel(item),
-    distanceLabel: getDistanceLabel(item),
+    locationLabel,
+    countryCode,
+    maxDistanceKm: getItemMaxDistanceKm(item),
+    distanceLabel: shouldUseCityCoordinateFallback ? null : getDistanceLabel(item),
     teamName: item.teamName ?? item.team_name ?? item.team?.name ?? null,
     imageUrl: avatarData.imageUrl,
     initials: avatarData.initials,
@@ -266,21 +400,6 @@ const MapBounds = ({ points, proximityCenter = null, proximityRadiusKm = null })
   }, [map, points, proximityCenter, proximityRadiusKm]);
 
   return null;
-};
-
-const TypeBadge = ({ type }) => {
-  const meta = TYPE_META[type] ?? TYPE_META.team;
-  const Icon = meta.Icon;
-
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold"
-      style={{ color: meta.color, borderColor: meta.color, backgroundColor: meta.background }}
-    >
-      <Icon size={12} aria-hidden="true" />
-      {meta.label}
-    </span>
-  );
 };
 
 const MarkerTooltipContent = ({ point }) => {
@@ -368,34 +487,89 @@ const BreakableName = ({ name }) => {
   return <>{words[0]}<br />{words.slice(1).join(" ")}</>;
 };
 
-const MapPopupCard = ({ point, onOpenPoint }) => {
-  const map = useMap();
+const EntityMetaLine = ({ point }) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
   const Icon = meta.Icon;
 
   return (
+    <div className="flex items-center gap-0.5 text-[11px] font-medium text-base-content/70">
+      <Tooltip
+        content={getTypeTooltipLabel(point.type)}
+        wrapperClassName={POPUP_SUBLINE_ICON_CLASS}
+      >
+        <Icon size={POPUP_SUBLINE_ICON_SIZE} strokeWidth={2.25} aria-hidden="true" />
+      </Tooltip>
+      <span>{meta.label}</span>
+      {point.isDemo && (
+        <>
+          <Tooltip
+            content={getDemoLabel(point.type)}
+            wrapperClassName={`ml-1.5 overflow-hidden ${POPUP_SUBLINE_ICON_CLASS}`}
+          >
+            <FlaskConical size={POPUP_SUBLINE_ICON_SIZE} strokeWidth={2.25} aria-hidden="true" />
+          </Tooltip>
+          <span>Demo</span>
+        </>
+      )}
+    </div>
+  );
+};
+
+const LocationIcon = ({ point, size = 13, className = "" }) => {
+  if (point.isRemote) return <Globe size={size} className={className} aria-hidden="true" />;
+  if (point.locationLabel === LOCATION_NOT_AVAILABLE) {
+    return <MapPinX size={size} className={className} aria-hidden="true" />;
+  }
+  return <MapPin size={size} className={className} aria-hidden="true" />;
+};
+
+const getDetailsTooltipLabel = (type) => {
+  if (type === "team") return "Click to view team details";
+  if (type === "role") return "Click to view role details";
+  return "Click to view user details";
+};
+
+const getLocationStatusTooltipLabel = (point) => {
+  const entityLabel = TYPE_META[point.type]?.label ?? TYPE_META.team.label;
+  if (point.isRemote) return `Remote ${entityLabel}`;
+  const radiusLabel =
+    point.type === "role" && point.maxDistanceKm
+      ? `\nwithin ${point.maxDistanceKm} km from Role Location`
+      : "";
+  if (point.countryCode) {
+    return `${entityLabel} in ${point.locationLabel}${radiusLabel}`;
+  }
+  if (point.locationLabel !== LOCATION_NOT_AVAILABLE) {
+    return `${entityLabel} in ${point.locationLabel}${radiusLabel}`;
+  }
+  return `${entityLabel} without Location info`;
+};
+
+const LocationStatusIndicator = ({ point }) => {
+  if (point.countryCode && point.locationLabel !== LOCATION_NOT_AVAILABLE && !point.isRemote) {
+    return (
+      <span className="rounded-full border border-[var(--color-primary-focus)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-primary-focus)]">
+        {point.countryCode}
+      </span>
+    );
+  }
+
+  return (
+    <LocationIcon
+      point={point}
+      size={14}
+      className="text-[var(--color-primary-focus)]"
+    />
+  );
+};
+
+const MapPopupCard = ({ point, onOpenPoint }) => {
+  const map = useMap();
+
+  return (
     <div className="inline-block max-w-60 align-top">
       <div className="mb-2 flex items-center justify-between text-base-content/70">
-        <div className="flex items-center gap-0.5 text-[11px] font-medium">
-          <Tooltip
-            content={getTypeTooltipLabel(point.type)}
-            wrapperClassName={POPUP_SUBLINE_ICON_CLASS}
-          >
-            <Icon size={POPUP_SUBLINE_ICON_SIZE} strokeWidth={2.25} aria-hidden="true" />
-          </Tooltip>
-          <span>{meta.label}</span>
-          {point.isDemo && (
-            <>
-              <Tooltip
-                content={getDemoLabel(point.type)}
-                wrapperClassName={`ml-1.5 overflow-hidden ${POPUP_SUBLINE_ICON_CLASS}`}
-              >
-                <FlaskConical size={POPUP_SUBLINE_ICON_SIZE} strokeWidth={2.25} aria-hidden="true" />
-              </Tooltip>
-              <span>Demo</span>
-            </>
-          )}
-        </div>
+        <EntityMetaLine point={point} />
         <button
           type="button"
           onClick={() => map.closePopup()}
@@ -406,10 +580,10 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
         </button>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <PopupAvatar point={point} />
         <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 break-words text-[17px] font-bold leading-[1.1] text-base-content">
+          <h3 className="line-clamp-2 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
             <BreakableName name={point.name} />
           </h3>
         </div>
@@ -423,7 +597,7 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
           </div>
         )}
         <div className="flex items-center gap-1.5">
-          {point.isRemote ? <Globe size={13} /> : <MapPin size={13} />}
+          <LocationIcon point={point} />
           <span>{point.locationLabel}</span>
         </div>
         {point.distanceLabel && (
@@ -464,6 +638,7 @@ const SearchMapView = ({
   const teamModal = useTeamModalSafe();
   const userModal = useUserModalSafe();
   const [selectedRolePoint, setSelectedRolePoint] = useState(null);
+  const [activeStatusTooltipPointId, setActiveStatusTooltipPointId] = useState(null);
 
   const normalizedPoints = useMemo(
     () => items.map(normalizeMapPoint).filter(Boolean),
@@ -593,12 +768,14 @@ const SearchMapView = ({
             {searchType === "all" && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {Object.entries(TYPE_META).map(([type, meta]) => (
-                  <span key={type} className="inline-flex items-center gap-1 text-xs text-base-content/70">
+                  <span key={type} className="inline-flex items-center gap-1.5 text-xs text-base-content/70">
                     <span
-                      className="h-2.5 w-2.5 rounded-full"
+                      className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full"
                       style={{ backgroundColor: meta.color }}
                       aria-hidden="true"
-                    />
+                    >
+                      <meta.Icon size={12} strokeWidth={2.25} className="block text-white" />
+                    </span>
                     {meta.label}
                   </span>
                 ))}
@@ -607,28 +784,61 @@ const SearchMapView = ({
 
             {fallbackPoints.length > 0 && (
               <div className="mt-5 flex min-h-0 flex-1 flex-col">
-                <h4 className="text-xs font-bold uppercase tracking-wide text-base-content/60">
-                  Remote or unmapped
-                </h4>
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-sm font-bold text-base-content">
+                    Remote or unmapped
+                  </h4>
+                  <span className="text-xs text-base-content/60">
+                    {fallbackPoints.length}/{normalizedPoints.length}
+                  </span>
+                </div>
                 <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                   {fallbackPoints.map((point) => (
-                    <button
+                    <Tooltip
                       key={point.id}
-                      type="button"
-                      onClick={() => openPoint(point)}
-                      className="w-full rounded-lg border border-base-200 bg-white/80 p-2 text-left transition hover:border-[var(--color-primary)] hover:bg-[#f0fdf4] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                      content={
+                        activeStatusTooltipPointId === point.id
+                          ? null
+                          : getDetailsTooltipLabel(point.type)
+                      }
+                      wrapperClassName="block"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <TypeBadge type={point.type} />
-                        {point.isRemote && <Globe size={14} className="text-[var(--color-primary)]" />}
-                      </div>
-                      <p className="mt-1 truncate text-xs font-bold text-base-content">
-                        {point.name}
-                      </p>
-                      <p className="truncate text-[11px] text-base-content/60">
-                        {point.teamName || point.locationLabel}
-                      </p>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openPoint(point)}
+                        className="w-full rounded-lg border border-base-200 bg-white/80 p-2 text-left shadow-soft transition-all duration-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <EntityMetaLine point={point} />
+                          <span
+                            className="inline-flex"
+                            onMouseEnter={() => setActiveStatusTooltipPointId(point.id)}
+                            onMouseLeave={() => setActiveStatusTooltipPointId(null)}
+                            onFocus={() => setActiveStatusTooltipPointId(point.id)}
+                            onBlur={() => setActiveStatusTooltipPointId(null)}
+                          >
+                            <Tooltip
+                              content={getLocationStatusTooltipLabel(point)}
+                              wrapperClassName="inline-flex items-center"
+                            >
+                              <LocationStatusIndicator point={point} />
+                            </Tooltip>
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          <PopupAvatar point={point} />
+                          <h5 className="line-clamp-2 min-w-0 flex-1 break-words text-[17px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
+                            <BreakableName name={point.name} />
+                          </h5>
+                        </div>
+                        {point.type === "role" && point.teamName && (
+                          <div className="mt-3 flex items-center gap-1.5 text-xs text-base-content/70">
+                            <Users size={13} />
+                            <span className="min-w-0 flex-1 truncate">{point.teamName}</span>
+                          </div>
+                        )}
+                      </button>
+                    </Tooltip>
                   ))}
                 </div>
               </div>
