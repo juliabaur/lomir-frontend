@@ -192,7 +192,7 @@ case "owner":
               <div className="flex items-center space-x-3">
                 {/* Avatar */}
                 <div className="avatar placeholder">
-                  <div className="bg-primary text-primary-content rounded-full w-10 h-10">
+                  <div className="bg-[var(--color-primary-focus)] text-primary-content rounded-full w-10 h-10">
                     {member.avatar_url ? (
                       <img
                         src={member.avatar_url}

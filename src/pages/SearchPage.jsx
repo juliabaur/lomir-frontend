@@ -596,14 +596,7 @@ const SearchPage = () => {
       : sortedUsers.slice(0, Math.max(0, resultsPerPage - displayedTeams.length));
   const visibleMapItems =
     searchType === "all"
-      ? [
-          ...filteredResults.teams.map((team) => ({ ...team, _resultType: "team" })),
-          ...filteredResults.users.map((matchedUser) => ({
-            ...matchedUser,
-            _resultType: "user",
-          })),
-          ...filteredResults.roles.map((role) => ({ ...role, _resultType: "role" })),
-        ]
+      ? mergedDisplayItems
       : searchType === "roles"
         ? filteredResults.roles.map((role) => ({ ...role, _resultType: "role" }))
         : [

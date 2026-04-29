@@ -1423,7 +1423,7 @@ const TeamDetailsModal = ({
                 {/* Team header with avatar */}
                 <div className="flex items-start space-x-4 mb-6">
                   <div className="avatar placeholder relative">
-                    <div className="bg-primary text-primary-content rounded-full w-16 h-16 relative flex items-center justify-center overflow-hidden">
+                    <div className="bg-[var(--color-primary-focus)] text-primary-content rounded-full w-16 h-16 relative flex items-center justify-center overflow-hidden">
                       {(team?.teamavatar_url || team?.teamavatarUrl) &&
                       !teamImageError ? (
                         <img
