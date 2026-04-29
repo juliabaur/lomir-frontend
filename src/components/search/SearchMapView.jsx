@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Circle,
   MapContainer,
   Marker,
-  Popup,
   TileLayer,
   Tooltip as LeafletTooltip,
   useMap,
@@ -73,6 +73,12 @@ const DEFAULT_CENTER = [51.1657, 10.4515];
 const LOCATION_NOT_AVAILABLE = "Location not available";
 const POPUP_SUBLINE_ICON_SIZE = 10;
 const POPUP_SUBLINE_ICON_CLASS = "inline-flex h-3 w-3 items-center justify-center";
+const MAP_POPUP_MAX_WIDTH = 340;
+const MAP_POPUP_GAP = 14;
+const MAP_POPUP_VIEWPORT_PADDING = 12;
+const MAP_POPUP_ARROW_EDGE_PADDING = 14;
+const MAP_MARKER_HALF_HEIGHT = 17;
+const MAP_POPUP_ARROW_MASK = `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.500009 1C3.5 1 3.00001 7 6.00001 7C9 7 8.5 1 11.5 1C12 1 12 0.5 12 0H0C0 0.5 0 1 0.500009 1Z' fill='white'/%3E%3C/svg%3E")`;
 const COUNTRY_COORDINATE_BOUNDS = {
   DE: { minLat: 47.2, maxLat: 55.2, minLng: 5.7, maxLng: 15.1 },
   FR: { minLat: 41.2, maxLat: 51.2, minLng: -5.6, maxLng: 9.7 },
@@ -123,8 +129,8 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
-const MARKER_DEMO_LABEL_MARKUP = `
-  <span class="lomir-map-marker-demo-overlay">
+const getMarkerDemoLabelMarkup = (hasImage) => `
+  <span class="lomir-map-marker-demo-overlay${hasImage ? " lomir-map-marker-demo-overlay--image" : ""}">
     <span class="lomir-map-marker-demo-label">DEMO</span>
   </span>
 `;
@@ -507,7 +513,7 @@ const buildMarkerIcon = (point) => {
   const imageMarkup = point.imageUrl
     ? `<img src="${escapeHtml(point.imageUrl)}" alt="" class="lomir-map-marker-avatar-image" onerror="this.style.display='none'" />`
     : "";
-  const demoMarkup = point.isDemo ? MARKER_DEMO_LABEL_MARKUP : "";
+  const demoMarkup = point.isDemo ? getMarkerDemoLabelMarkup(Boolean(point.imageUrl)) : "";
 
   return L.divIcon({
     className: "lomir-map-marker",
@@ -799,6 +805,16 @@ const MapBounds = ({ points, proximityCenter = null, proximityRadiusKm = null })
     const bounds = L.latLngBounds(points.map((point) => [point.lat, point.lng]));
     map.fitBounds(bounds, { padding: [36, 36], maxZoom: 12, animate: false });
   }, [map, points, proximityCenter, proximityRadiusKm]);
+
+  return null;
+};
+
+const MapInstanceCapture = ({ onReady }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    onReady(map);
+  }, [map, onReady]);
 
   return null;
 };
@@ -1319,16 +1335,15 @@ const MapPopupCard = ({
   onOpenPoint,
   onOpenInvitation,
   onOpenApplication,
+  onClose,
 }) => {
-  const map = useMap();
-
   return (
     <div className="inline-block max-w-[22rem] align-top">
       <div className="mb-2 flex items-center justify-between text-base-content/70">
         <EntityMetaLine point={point} />
         <button
           type="button"
-          onClick={() => map.closePopup()}
+          onClick={onClose}
           aria-label="Close"
           className="ml-2 flex items-center justify-center text-base-content/40 hover:text-base-content/70"
         >
@@ -1421,6 +1436,12 @@ const SearchMapView = ({
   const [fetchedUserTeamIds, setFetchedUserTeamIds] = useState(() => new Set());
   const [selectedInvitation, setSelectedInvitation] = useState(null);
   const [selectedApplication, setSelectedApplication] = useState(null);
+  const [mapInstance, setMapInstance] = useState(null);
+  const [activePopupPointId, setActivePopupPointId] = useState(null);
+  const [popupAnchor, setPopupAnchor] = useState(null);
+  const [popupCoords, setPopupCoords] = useState(null);
+  const [popupPlacement, setPopupPlacement] = useState("top");
+  const popupRef = useRef(null);
 
   const fetchUserRequestData = useCallback(async () => {
     if (!authUserId) {
@@ -1655,8 +1676,182 @@ const SearchMapView = ({
         .filter(Boolean),
     [authUserId, fetchedTeamRoles, fetchedApplications, fetchedInvitations, fetchedUserTeamIds, items],
   );
-  const markerPoints = normalizedPoints.filter((point) => point.hasCoordinates);
-  const fallbackPoints = normalizedPoints.filter((point) => !point.hasCoordinates);
+  const markerPoints = useMemo(
+    () => normalizedPoints.filter((point) => point.hasCoordinates),
+    [normalizedPoints],
+  );
+  const fallbackPoints = useMemo(
+    () => normalizedPoints.filter((point) => !point.hasCoordinates),
+    [normalizedPoints],
+  );
+  const activePoint = useMemo(
+    () =>
+      markerPoints.find((point) => point.id === activePopupPointId) ?? null,
+    [activePopupPointId, markerPoints],
+  );
+  const activePointId = activePoint?.id ?? null;
+  const activePointLat = activePoint?.lat ?? null;
+  const activePointLng = activePoint?.lng ?? null;
+  const closeActivePopup = useCallback(() => {
+    setActivePopupPointId(null);
+    setPopupAnchor(null);
+    setPopupCoords(null);
+    setPopupPlacement("top");
+  }, []);
+
+  useEffect(() => {
+    if (activePopupPointId && !activePoint) {
+      closeActivePopup();
+    }
+  }, [activePopupPointId, activePoint, closeActivePopup]);
+
+  useEffect(() => {
+    if (!mapInstance || activePointLat === null || activePointLng === null) {
+      setPopupAnchor(null);
+      setPopupCoords(null);
+      return undefined;
+    }
+
+    setPopupCoords(null);
+
+    const updatePopupAnchor = () => {
+      const latLng = L.latLng(activePointLat, activePointLng);
+
+      if (!mapInstance.getBounds().contains(latLng)) {
+        closeActivePopup();
+        return;
+      }
+
+      const containerPoint = mapInstance.latLngToContainerPoint(latLng);
+      const mapRect = mapInstance.getContainer().getBoundingClientRect();
+      const nextAnchor = {
+        x: mapRect.left + containerPoint.x,
+        y: mapRect.top + containerPoint.y,
+      };
+
+      setPopupAnchor((previousAnchor) =>
+        previousAnchor?.x === nextAnchor.x && previousAnchor?.y === nextAnchor.y
+          ? previousAnchor
+          : nextAnchor,
+      );
+    };
+
+    updatePopupAnchor();
+    mapInstance.on("move", updatePopupAnchor);
+    mapInstance.on("zoom", updatePopupAnchor);
+    mapInstance.on("zoomend", updatePopupAnchor);
+    window.addEventListener("resize", updatePopupAnchor);
+
+    return () => {
+      mapInstance.off("move", updatePopupAnchor);
+      mapInstance.off("zoom", updatePopupAnchor);
+      mapInstance.off("zoomend", updatePopupAnchor);
+      window.removeEventListener("resize", updatePopupAnchor);
+    };
+  }, [mapInstance, activePointId, activePointLat, activePointLng, closeActivePopup]);
+
+  const calculatePopupPosition = useCallback(() => {
+    if (!popupAnchor || !popupRef.current) return;
+
+    const popupRect = popupRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const popupWidth = popupRect.width || MAP_POPUP_MAX_WIDTH;
+    const popupHeight = popupRect.height;
+
+    let placement = "top";
+    let top =
+      popupAnchor.y -
+      MAP_MARKER_HALF_HEIGHT -
+      popupHeight -
+      MAP_POPUP_GAP;
+    let left = popupAnchor.x - popupWidth / 2;
+
+    if (top < MAP_POPUP_VIEWPORT_PADDING) {
+      placement = "bottom";
+      top = popupAnchor.y + MAP_MARKER_HALF_HEIGHT + MAP_POPUP_GAP;
+    }
+
+    const maxLeft = Math.max(
+      MAP_POPUP_VIEWPORT_PADDING,
+      viewportWidth - popupWidth - MAP_POPUP_VIEWPORT_PADDING,
+    );
+    const maxTop = Math.max(
+      MAP_POPUP_VIEWPORT_PADDING,
+      viewportHeight - popupHeight - MAP_POPUP_VIEWPORT_PADDING,
+    );
+
+    left = Math.max(MAP_POPUP_VIEWPORT_PADDING, Math.min(left, maxLeft));
+    top = Math.max(MAP_POPUP_VIEWPORT_PADDING, Math.min(top, maxTop));
+
+    setPopupPlacement((previousPlacement) =>
+      previousPlacement === placement ? previousPlacement : placement,
+    );
+    setPopupCoords((previousCoords) =>
+      previousCoords?.top === top &&
+      previousCoords?.left === left &&
+      previousCoords?.width === popupWidth
+        ? previousCoords
+        : { top, left, width: popupWidth },
+    );
+  }, [popupAnchor]);
+
+  useLayoutEffect(() => {
+    if (!activePopupPointId || !popupAnchor) return;
+    calculatePopupPosition();
+  }, [activePopupPointId, popupAnchor, calculatePopupPosition]);
+
+  useEffect(() => {
+    if (!activePopupPointId || !popupAnchor) return undefined;
+
+    let frameId = null;
+    const recalculateOnResize = () => {
+      if (frameId) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(calculatePopupPosition);
+    };
+
+    window.addEventListener("resize", recalculateOnResize);
+
+    return () => {
+      if (frameId) window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", recalculateOnResize);
+    };
+  }, [activePopupPointId, popupAnchor, calculatePopupPosition]);
+
+  useEffect(() => {
+    if (!activePopupPointId) return undefined;
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") closeActivePopup();
+    };
+    const closeOnOutsideMouseDown = (event) => {
+      if (popupRef.current?.contains(event.target)) return;
+      if (event.target.closest?.(".leaflet-marker-icon")) return;
+      if (mapInstance?.getContainer().contains(event.target)) return;
+
+      closeActivePopup();
+    };
+
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("mousedown", closeOnOutsideMouseDown);
+
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("mousedown", closeOnOutsideMouseDown);
+    };
+  }, [activePopupPointId, closeActivePopup, mapInstance]);
+
+  useEffect(() => {
+    if (!mapInstance) return undefined;
+
+    const closeOnMapClick = () => closeActivePopup();
+    mapInstance.on("click", closeOnMapClick);
+
+    return () => {
+      mapInstance.off("click", closeOnMapClick);
+    };
+  }, [mapInstance, closeActivePopup]);
+
   const proximityCenter = getLatLng(viewerLocation);
   const activeProximityRadiusKm = toNumber(proximityRadiusKm);
   const shouldFitProximity =
@@ -1669,6 +1864,15 @@ const SearchMapView = ({
       : markerPoints.length > 0
         ? [markerPoints[0].lat, markerPoints[0].lng]
         : DEFAULT_CENTER;
+  const popupArrowLeft = popupCoords?.width && popupAnchor
+    ? Math.max(
+        MAP_POPUP_ARROW_EDGE_PADDING,
+        Math.min(
+          popupAnchor.x - popupCoords.left,
+          popupCoords.width - MAP_POPUP_ARROW_EDGE_PADDING,
+        ),
+      )
+    : null;
 
   const openPoint = (point) => {
     if (point.type === "team") {
@@ -1716,6 +1920,7 @@ const SearchMapView = ({
               maxBoundsViscosity={1}
               className="h-[360px] w-full lg:h-[520px]"
             >
+              <MapInstanceCapture onReady={setMapInstance} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -1746,6 +1951,15 @@ const SearchMapView = ({
                   key={point.id}
                   position={[point.lat, point.lng]}
                   icon={buildMarkerIcon(point)}
+                  bubblingMouseEvents={false}
+                  eventHandlers={{
+                    click: (event) => {
+                      event.originalEvent?.stopPropagation?.();
+                      setPopupCoords(null);
+                      setPopupPlacement("top");
+                      setActivePopupPointId(point.id);
+                    },
+                  }}
                 >
                   <LeafletTooltip
                     className="lomir-map-tooltip"
@@ -1755,19 +1969,6 @@ const SearchMapView = ({
                   >
                     <MarkerTooltipContent point={point} />
                   </LeafletTooltip>
-                  <Popup
-                    className="lomir-map-popup"
-                    closeButton={false}
-                    minWidth={0}
-                    maxWidth={352}
-                  >
-                    <MapPopupCard
-                      point={point}
-                      onOpenPoint={openPoint}
-                      onOpenInvitation={openInvitationDetails}
-                      onOpenApplication={openApplicationDetails}
-                    />
-                  </Popup>
                 </Marker>
               ))}
             </MapContainer>
@@ -1903,6 +2104,66 @@ const SearchMapView = ({
           </aside>
         </div>
       </div>
+
+      {activePopupPointId &&
+        activePoint &&
+        popupAnchor &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={popupRef}
+            role="dialog"
+            aria-label={`${activePoint.name} map result`}
+            data-placement={popupPlacement}
+            className="fixed z-[9999] rounded-xl border border-base-200 bg-base-100 p-3 shadow-soft"
+            style={{
+              top: `${popupCoords ? popupCoords.top : popupAnchor.y}px`,
+              left: `${popupCoords ? popupCoords.left : popupAnchor.x}px`,
+              width: "max-content",
+              maxWidth: `min(${MAP_POPUP_MAX_WIDTH}px, calc(100vw - ${MAP_POPUP_VIEWPORT_PADDING * 2}px))`,
+              visibility: popupCoords ? "visible" : "hidden",
+            }}
+          >
+            <MapPopupCard
+              point={activePoint}
+              onClose={closeActivePopup}
+              onOpenPoint={(point) => {
+                closeActivePopup();
+                openPoint(point);
+              }}
+              onOpenInvitation={(invitation) => {
+                closeActivePopup();
+                openInvitationDetails(invitation);
+              }}
+              onOpenApplication={(application) => {
+                closeActivePopup();
+                openApplicationDetails(application);
+              }}
+            />
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute h-2 w-3"
+              style={{
+                backgroundColor: "var(--color-base-100, #ffffff)",
+                bottom: popupPlacement === "top" ? "-7px" : "auto",
+                filter: "drop-shadow(0 2px 6px rgba(4, 80, 20, 0.12))",
+                left: popupArrowLeft ? `${popupArrowLeft}px` : "50%",
+                maskImage: MAP_POPUP_ARROW_MASK,
+                maskRepeat: "no-repeat",
+                maskSize: "contain",
+                top: popupPlacement === "bottom" ? "-7px" : "auto",
+                transform:
+                  popupPlacement === "bottom"
+                    ? "translateX(-50%) rotate(180deg)"
+                    : "translateX(-50%)",
+                WebkitMaskImage: MAP_POPUP_ARROW_MASK,
+                WebkitMaskRepeat: "no-repeat",
+                WebkitMaskSize: "contain",
+              }}
+            />
+          </div>,
+          document.body,
+        )}
 
       {selectedInvitation && (
         <TeamInvitationDetailsModal
