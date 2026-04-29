@@ -1017,6 +1017,7 @@ const getTeamRoleTooltip = (role) => {
 const TeamMetaLine = ({
   point,
   withTooltips = true,
+  showRoleRequestNames = true,
   onOpenInvitation = null,
   onOpenApplication = null,
 }) => {
@@ -1083,7 +1084,7 @@ const TeamMetaLine = ({
           <Mail size={10} className="text-orange-500" aria-hidden="true" />
         </TeamMetaItem>
       )}
-      {roleNameItem(point.teamRoleInvitationName)}
+      {showRoleRequestNames && roleNameItem(point.teamRoleInvitationName)}
       {point.hasTeamApplication && (
         <TeamMetaItem
           tooltip="You applied to join this team"
@@ -1108,7 +1109,7 @@ const TeamMetaLine = ({
           <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />
         </TeamMetaItem>
       )}
-      {roleNameItem(point.teamRoleApplicationName)}
+      {showRoleRequestNames && roleNameItem(point.teamRoleApplicationName)}
       {point.openRoleCount > 0 && (
         <TeamMetaItem
           tooltip={`${point.openRoleCount} open ${point.openRoleCount === 1 ? "role" : "roles"} posted in this team`}
@@ -1853,6 +1854,7 @@ const SearchMapView = ({
                               <UserSubline point={point} />
                               <TeamMetaLine
                                 point={point}
+                                showRoleRequestNames={false}
                                 onOpenInvitation={openInvitationDetails}
                                 onOpenApplication={openApplicationDetails}
                               />
