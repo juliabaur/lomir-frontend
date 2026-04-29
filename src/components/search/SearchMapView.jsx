@@ -69,6 +69,13 @@ const TYPE_META = {
   },
 };
 
+const DEFAULT_MAP_ENTITY_COLOR = "var(--color-primary-focus)";
+
+const getMapEntityColor = (point, searchType = "all") =>
+  searchType === "all"
+    ? TYPE_META[point.type]?.color ?? TYPE_META.team.color
+    : DEFAULT_MAP_ENTITY_COLOR;
+
 const DEFAULT_CENTER = [51.1657, 10.4515];
 const LOCATION_NOT_AVAILABLE = "Location not available";
 const POPUP_SUBLINE_ICON_SIZE = 10;
@@ -507,9 +514,9 @@ const getTypeTooltipLabel = (type) => {
   return "User Profile";
 };
 
-const buildMarkerIcon = (point) => {
-  const meta = TYPE_META[point.type] ?? TYPE_META.team;
+const buildMarkerIcon = (point, searchType = "all") => {
   const initials = escapeHtml(point.initials);
+  const markerColor = getMapEntityColor(point, searchType);
   const imageMarkup = point.imageUrl
     ? `<img src="${escapeHtml(point.imageUrl)}" alt="" class="lomir-map-marker-avatar-image" onerror="this.style.display='none'" />`
     : "";
@@ -520,7 +527,7 @@ const buildMarkerIcon = (point) => {
     html: `
       <span
         class="lomir-map-marker-pin"
-        style="--marker-color: ${meta.color};"
+        style="--marker-color: ${markerColor};"
         aria-hidden="true"
       >
         <span class="lomir-map-marker-avatar">
@@ -841,11 +848,15 @@ const MarkerTooltipContent = ({ point }) => {
 
 const PopupAvatar = ({ point, backgroundColor = null }) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
+  const avatarColor = backgroundColor ?? meta.color;
 
   return (
     <span
       className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
-      style={{ backgroundColor: backgroundColor ?? meta.color }}
+      style={{
+        backgroundColor: avatarColor,
+        "--tw-ring-color": avatarColor,
+      }}
       aria-hidden="true"
     >
       <span>{point.initials}</span>
@@ -854,6 +865,7 @@ const PopupAvatar = ({ point, backgroundColor = null }) => {
           src={point.imageUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
+          style={{ backgroundColor: avatarColor }}
         />
       )}
       {point.isDemo && (
@@ -1332,6 +1344,7 @@ const RoleSubline = ({
 
 const MapPopupCard = ({
   point,
+  searchType = "all",
   onOpenPoint,
   onOpenInvitation,
   onOpenApplication,
@@ -1352,7 +1365,7 @@ const MapPopupCard = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
+        <PopupAvatar point={point} backgroundColor={getMapEntityColor(point, searchType)} />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
             {point.name}
@@ -1950,7 +1963,7 @@ const SearchMapView = ({
                 <Marker
                   key={point.id}
                   position={[point.lat, point.lng]}
-                  icon={buildMarkerIcon(point)}
+                  icon={buildMarkerIcon(point, searchType)}
                   bubblingMouseEvents={false}
                   eventHandlers={{
                     click: (event) => {
@@ -2051,7 +2064,7 @@ const SearchMapView = ({
                           </span>
                         </div>
                         <div className="mt-1 flex items-center gap-1.5">
-                          <PopupAvatar point={point} backgroundColor="var(--color-primary-focus)" />
+                          <PopupAvatar point={point} backgroundColor={DEFAULT_MAP_ENTITY_COLOR} />
                           <div className="min-w-0 flex-1">
                             <h5 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
                               {point.name}
@@ -2126,6 +2139,7 @@ const SearchMapView = ({
           >
             <MapPopupCard
               point={activePoint}
+              searchType={searchType}
               onClose={closeActivePopup}
               onOpenPoint={(point) => {
                 closeActivePopup();
