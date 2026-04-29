@@ -113,8 +113,11 @@
     align-items: center;
     justify-content: center;
     color: #ffffff;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0));
     pointer-events: none;
+  }
+
+  .lomir-map-marker-demo-overlay--image {
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.58), rgba(0, 0, 0, 0));
   }
 
   .lomir-map-marker-demo-label {
@@ -126,24 +129,8 @@
     letter-spacing: 0;
     line-height: 1;
     text-overflow: clip;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
     transform: translateY(-1px);
     white-space: nowrap;
-  }
-
-  .lomir-map-popup .leaflet-popup-content-wrapper {
-    border: 1px solid var(--color-border);
-    border-radius: 0.75rem;
-    box-shadow: var(--shadow-card);
-  }
-
-  .lomir-map-popup .leaflet-popup-content {
-    margin: 0.85rem;
-    font-family: "Roboto", sans-serif;
-  }
-
-  .lomir-map-popup .leaflet-popup-tip {
-    box-shadow: var(--shadow-card);
   }
 
   .lomir-map-tooltip.leaflet-tooltip {
