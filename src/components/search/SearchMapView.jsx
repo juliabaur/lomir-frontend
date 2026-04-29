@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Circle,
   MapContainer,
@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import VacantRoleDetailsModal from "../teams/VacantRoleDetailsModal";
+import TeamApplicationDetailsModal from "../teams/TeamApplicationDetailsModal";
+import TeamInvitationDetailsModal from "../teams/TeamInvitationDetailsModal";
 import { useTeamModalSafe } from "../../contexts/TeamModalContext";
 import { useUserModalSafe } from "../../contexts/UserModalContext";
 import { useAuth } from "../../contexts/AuthContext";
@@ -94,6 +96,9 @@ const toNumber = (value) => {
 const firstPresent = (...values) =>
   values.find((value) => value !== undefined && value !== null && value !== "") ?? null;
 
+const firstObject = (...values) =>
+  values.find((value) => value && typeof value === "object") ?? null;
+
 const normalizeLocationKey = (value) => String(value ?? "").trim().toLowerCase();
 
 const normalizeRoleValue = (value) => {
@@ -111,6 +116,12 @@ const escapeHtml = (value) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+
+const MARKER_DEMO_LABEL_MARKUP = `
+  <span class="lomir-map-marker-demo-overlay">
+    <span class="lomir-map-marker-demo-label">DEMO</span>
+  </span>
+`;
 
 const isValidCoordinate = (lat, lng) =>
   lat !== null &&
@@ -379,6 +390,36 @@ const getRoleHasInvitation = (item) => {
   return false;
 };
 
+const getEmbeddedRoleApplication = (item) =>
+  firstObject(
+    item.currentUserRoleApplication,
+    item.current_user_role_application,
+    item.currentUserApplication,
+    item.current_user_application,
+    item.pendingRoleApplication,
+    item.pending_role_application,
+    item.pendingApplication,
+    item.pending_application,
+    item.roleApplication,
+    item.role_application,
+    item.application,
+  );
+
+const getEmbeddedRoleInvitation = (item) =>
+  firstObject(
+    item.currentUserRoleInvitation,
+    item.current_user_role_invitation,
+    item.currentUserInvitation,
+    item.current_user_invitation,
+    item.pendingRoleInvitation,
+    item.pending_role_invitation,
+    item.pendingInvitation,
+    item.pending_invitation,
+    item.roleInvitation,
+    item.role_invitation,
+    item.invitation,
+  );
+
 const getRoleIsViewerTeamMember = (item) => {
   if (isTruthyValue(firstPresent(
     item.isTeamMember, item.is_team_member,
@@ -458,6 +499,7 @@ const buildMarkerIcon = (point) => {
   const imageMarkup = point.imageUrl
     ? `<img src="${escapeHtml(point.imageUrl)}" alt="" class="lomir-map-marker-avatar-image" onerror="this.style.display='none'" />`
     : "";
+  const demoMarkup = point.isDemo ? MARKER_DEMO_LABEL_MARKUP : "";
 
   return L.divIcon({
     className: "lomir-map-marker",
@@ -470,6 +512,7 @@ const buildMarkerIcon = (point) => {
         <span class="lomir-map-marker-avatar">
           <span class="lomir-map-marker-avatar-fallback">${initials}</span>
           ${imageMarkup}
+          ${demoMarkup}
         </span>
       </span>
     `,
@@ -491,7 +534,86 @@ const matchesRoleItem = (entry, roleRawId, roleTeamId, roleNameStr) => {
   );
 };
 
-const normalizeMapPoint = (item, viewerUser = null, fetchedTeamRoles = {}, fetchedApplications = [], fetchedInvitations = []) => {
+const getRequestTeamId = (entry) =>
+  firstPresent(
+    entry?.team?.id,
+    entry?.teamId,
+    entry?.team_id,
+    entry?.role?.teamId,
+    entry?.role?.team_id,
+  );
+
+const getRequestRoleName = (entry) => {
+  const roleName = firstPresent(
+    entry?.role?.roleName,
+    entry?.role?.role_name,
+    entry?.roleName,
+    entry?.role_name,
+  );
+
+  if (typeof roleName === "string" && roleName.trim()) {
+    return roleName.trim();
+  }
+
+  const roleId = firstPresent(entry?.role?.id, entry?.roleId, entry?.role_id);
+  return roleId != null ? "Vacant Role" : null;
+};
+
+const requestTargetsTeam = (entry, teamId) => {
+  const entryTeamId = getRequestTeamId(entry);
+  return entryTeamId != null && teamId != null && String(entryTeamId) === String(teamId);
+};
+
+const getRequestStatus = (entry) =>
+  String(
+    firstPresent(
+      entry?.status,
+      entry?.applicationStatus,
+      entry?.application_status,
+      entry?.invitationStatus,
+      entry?.invitation_status,
+    ) ?? "",
+  ).toLowerCase();
+
+const isActiveApplicationRequest = (entry) => {
+  const status = getRequestStatus(entry);
+  return status === "" || !INACTIVE_APPLICATION_STATUSES.has(status);
+};
+
+const isActiveInvitationRequest = (entry) => {
+  const status = getRequestStatus(entry);
+  return status === "" || !INACTIVE_INVITATION_STATUSES.has(status);
+};
+
+const isRoleScopedRequest = (entry) =>
+  Boolean(getRequestRoleName(entry)) ||
+  isTruthyValue(firstPresent(
+    entry?.isInternal,
+    entry?.is_internal,
+    entry?.isInternalRoleApplication,
+    entry?.is_internal_role_application,
+    entry?.isRoleApplication,
+    entry?.is_role_application,
+    entry?.isRoleInvitation,
+    entry?.is_role_invitation,
+  ));
+
+const findTeamRequest = (entries, teamId, { roleScoped, isActiveRequest }) =>
+  entries.find(
+    (entry) =>
+      requestTargetsTeam(entry, teamId) &&
+      isActiveRequest(entry) &&
+      isRoleScopedRequest(entry) === roleScoped,
+  ) ?? null;
+
+const normalizeMapPoint = (
+  item,
+  viewerUser = null,
+  fetchedTeamRoles = {},
+  fetchedApplications = [],
+  fetchedInvitations = [],
+  fetchedUserTeamIds = new Set(),
+) => {
   if (!item) return null;
 
   const type = getMapPointType(item);
@@ -538,6 +660,54 @@ const normalizeMapPoint = (item, viewerUser = null, fetchedTeamRoles = {}, fetch
     type === "team"
       ? normalizeRoleValue(fetchedTeamRole) ?? getTeamViewerRole(item, viewerUser)
       : null;
+  const roleTeamId =
+    type === "role"
+      ? firstPresent(item.teamId, item.team_id, item.team?.id, item.team?.teamId, item.team?.team_id)
+      : null;
+  const teamInvitation =
+    type === "team" && rawId != null
+      ? findTeamRequest(fetchedInvitations, rawId, {
+          roleScoped: false,
+          isActiveRequest: isActiveInvitationRequest,
+        })
+      : null;
+  const teamRoleInvitation =
+    type === "team" && rawId != null
+      ? findTeamRequest(fetchedInvitations, rawId, {
+          roleScoped: true,
+          isActiveRequest: isActiveInvitationRequest,
+        })
+      : null;
+  const teamApplication =
+    type === "team" && rawId != null
+      ? findTeamRequest(fetchedApplications, rawId, {
+          roleScoped: false,
+          isActiveRequest: isActiveApplicationRequest,
+        })
+      : null;
+  const teamRoleApplication =
+    type === "team" && rawId != null
+      ? findTeamRequest(fetchedApplications, rawId, {
+          roleScoped: true,
+          isActiveRequest: isActiveApplicationRequest,
+        })
+      : null;
+  const roleApplication =
+    type === "role"
+      ? getEmbeddedRoleApplication(item) ??
+        fetchedApplications.find((app) =>
+          isActiveApplicationRequest(app) &&
+          matchesRoleItem(app, rawId, roleTeamId, getDisplayName(item, "role"))) ??
+        null
+      : null;
+  const roleInvitation =
+    type === "role"
+      ? getEmbeddedRoleInvitation(item) ??
+        fetchedInvitations.find((inv) =>
+          isActiveInvitationRequest(inv) &&
+          matchesRoleItem(inv, rawId, roleTeamId, getDisplayName(item, "role"))) ??
+        null
+      : null;
 
   return {
     id: `${type}-${rawId ?? getDisplayName(item, type)}`,
@@ -558,6 +728,16 @@ const normalizeMapPoint = (item, viewerUser = null, fetchedTeamRoles = {}, fetch
     maxMembers: type === "team" ? getTeamMaxMembers(item) : null,
     openRoleCount: type === "team" ? getTeamOpenRoleCount(item) : null,
     currentUserRole,
+    teamInvitation,
+    hasTeamInvitation: Boolean(teamInvitation),
+    teamRoleInvitation,
+    hasTeamRoleInvitation: Boolean(teamRoleInvitation),
+    teamRoleInvitationName: getRequestRoleName(teamRoleInvitation),
+    teamApplication,
+    hasTeamApplication: Boolean(teamApplication),
+    teamRoleApplication,
+    hasTeamRoleApplication: Boolean(teamRoleApplication),
+    teamRoleApplicationName: getRequestRoleName(teamRoleApplication),
     isPublic: type === "team" ? getTeamIsPublic(item) : null,
     imageUrl: avatarData.imageUrl,
     initials: avatarData.initials,
@@ -570,13 +750,19 @@ const normalizeMapPoint = (item, viewerUser = null, fetchedTeamRoles = {}, fetch
     postedAt: type === "role" ? getRolePostedAt(item) : null,
     hasApplied: type === "role" ? (
       getRoleHasApplied(item) ||
-      fetchedApplications.some((app) => matchesRoleItem(app, rawId, item.teamId ?? item.team_id ?? item.team?.id, getDisplayName(item, "role")))
+      Boolean(roleApplication)
     ) : false,
+    roleApplication,
     hasInvitation: type === "role" ? (
       getRoleHasInvitation(item) ||
-      fetchedInvitations.some((inv) => matchesRoleItem(inv, rawId, item.teamId ?? item.team_id ?? item.team?.id, getDisplayName(item, "role")))
+      Boolean(roleInvitation)
     ) : false,
-    isViewerTeamMember: type === "role" ? getRoleIsViewerTeamMember(item) : false,
+    roleInvitation,
+    isViewerTeamMember:
+      type === "role"
+        ? getRoleIsViewerTeamMember(item) ||
+          (roleTeamId != null && fetchedUserTeamIds.has(String(roleTeamId)))
+        : false,
   };
 };
 
@@ -615,6 +801,14 @@ const MarkerTooltipContent = ({ point }) => {
     <div className="flex items-center gap-1.5">
       <Icon size={13} className="block shrink-0" aria-hidden="true" />
       <span className="font-medium leading-none">{point.name}</span>
+      {point.isDemo && (
+        <FlaskConical
+          size={11}
+          strokeWidth={2.25}
+          className="block shrink-0"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 };
@@ -763,14 +957,36 @@ const LocationStatusIndicator = ({ point }) => {
   );
 };
 
-const TeamMetaItem = ({ tooltip = null, children, withTooltip = true }) => {
+const TeamMetaItem = ({
+  tooltip = null,
+  children,
+  withTooltip = true,
+  onClick = null,
+  ariaLabel = null,
+}) => {
+  const content = onClick ? (
+    <button
+      type="button"
+      aria-label={ariaLabel ?? tooltip ?? "Open details"}
+      className="inline-flex items-center gap-0.5 rounded-sm bg-transparent p-0 text-inherit transition-colors hover:text-[var(--color-primary-focus)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
+  ) : (
+    <span className="inline-flex items-center gap-0.5">{children}</span>
+  );
+
   if (!withTooltip || !tooltip) {
-    return <span className="inline-flex items-center gap-0.5">{children}</span>;
+    return content;
   }
 
   return (
     <Tooltip content={tooltip}>
-      <span className="inline-flex items-center gap-0.5">{children}</span>
+      {content}
     </Tooltip>
   );
 };
@@ -798,18 +1014,101 @@ const getTeamRoleTooltip = (role) => {
   return null;
 };
 
-const TeamMetaLine = ({ point, withTooltips = true }) => {
+const TeamMetaLine = ({
+  point,
+  withTooltips = true,
+  onOpenInvitation = null,
+  onOpenApplication = null,
+}) => {
   if (point.type !== "team") return null;
 
   const memberLabel = `${point.memberCount}/${point.maxMembers}`;
   const roleTooltip = getTeamRoleTooltip(point.currentUserRole);
+  const roleInvitationTooltip = point.teamRoleInvitationName
+    ? `You were invited to fill ${point.teamRoleInvitationName} in this team`
+    : "You were invited to fill a role in this team";
+  const roleApplicationTooltip = point.teamRoleApplicationName
+    ? `You applied for ${point.teamRoleApplicationName} in this team`
+    : "You applied for a role within this team";
+  const roleNameItem = (roleName) => {
+    if (!roleName || !withTooltips) return null;
+
+    return (
+      <Tooltip
+        content={roleName}
+        wrapperClassName="inline-flex min-w-0 max-w-[8rem] overflow-hidden"
+      >
+        <span className="inline-flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden">
+          <UserSearch size={10} className="shrink-0 text-orange-500" aria-hidden="true" />
+          <span className="truncate">{roleName}</span>
+        </span>
+      </Tooltip>
+    );
+  };
 
   return (
     <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
-      <TeamMetaItem tooltip={`${point.memberCount} of ${point.maxMembers} members`} withTooltip={withTooltips}>
+      <TeamMetaItem
+        tooltip={
+          point.currentUserRole
+            ? `You are a member of this team with ${point.memberCount} / ${point.maxMembers} members`
+            : `${point.memberCount} of ${point.maxMembers} members`
+        }
+        withTooltip={withTooltips}
+      >
         <Users size={10} className={point.currentUserRole ? "text-success" : ""} aria-hidden="true" />
         <span>{memberLabel}</span>
       </TeamMetaItem>
+      {point.hasTeamInvitation && (
+        <TeamMetaItem
+          tooltip="You were invited to this team"
+          withTooltip={withTooltips}
+          onClick={point.teamInvitation && onOpenInvitation
+            ? () => onOpenInvitation(point.teamInvitation)
+            : null}
+          ariaLabel="Open team invitation details"
+        >
+          <Mail size={10} className="text-pink-500" aria-hidden="true" />
+        </TeamMetaItem>
+      )}
+      {point.hasTeamRoleInvitation && (
+        <TeamMetaItem
+          tooltip={roleInvitationTooltip}
+          withTooltip={withTooltips}
+          onClick={point.teamRoleInvitation && onOpenInvitation
+            ? () => onOpenInvitation(point.teamRoleInvitation)
+            : null}
+          ariaLabel="Open role invitation details"
+        >
+          <Mail size={10} className="text-orange-500" aria-hidden="true" />
+        </TeamMetaItem>
+      )}
+      {roleNameItem(point.teamRoleInvitationName)}
+      {point.hasTeamApplication && (
+        <TeamMetaItem
+          tooltip="You applied to join this team"
+          withTooltip={withTooltips}
+          onClick={point.teamApplication && onOpenApplication
+            ? () => onOpenApplication(point.teamApplication)
+            : null}
+          ariaLabel="Open team application details"
+        >
+          <SendHorizontal size={10} className="text-info" aria-hidden="true" />
+        </TeamMetaItem>
+      )}
+      {point.hasTeamRoleApplication && (
+        <TeamMetaItem
+          tooltip={roleApplicationTooltip}
+          withTooltip={withTooltips}
+          onClick={point.teamRoleApplication && onOpenApplication
+            ? () => onOpenApplication(point.teamRoleApplication)
+            : null}
+          ariaLabel="Open role application details"
+        >
+          <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />
+        </TeamMetaItem>
+      )}
+      {roleNameItem(point.teamRoleApplicationName)}
       {point.openRoleCount > 0 && (
         <TeamMetaItem
           tooltip={`${point.openRoleCount} open ${point.openRoleCount === 1 ? "role" : "roles"} posted in this team`}
@@ -865,13 +1164,89 @@ const UserSubline = ({ point }) => {
   );
 };
 
-const RoleSubline = ({ point }) => {
+const RoleSubline = ({
+  point,
+  onOpenInvitation = null,
+  onOpenApplication = null,
+  teamOnly = false,
+}) => {
   if (point.type !== "role") return null;
 
   const postedDate = point.postedAt ? new Date(point.postedAt) : null;
   const isValidDate = postedDate && !isNaN(postedDate);
+  const statusIcon = ({ children, onClick, ariaLabel }) => {
+    if (!onClick) {
+      return <span className="inline-flex">{children}</span>;
+    }
 
-  if (!isValidDate && !point.hasApplied && !point.hasInvitation) return null;
+    return (
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        className="inline-flex rounded-sm bg-transparent p-0 text-inherit transition-colors hover:text-[var(--color-primary-focus)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      >
+        {children}
+      </button>
+    );
+  };
+
+  if (teamOnly) {
+    if (!point.isViewerTeamMember && !isValidDate && !point.hasInvitation && !point.hasApplied) return null;
+
+    return (
+      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
+        {isValidDate && (
+          <Tooltip content={`Posted ${format(postedDate, "MMM d, yyyy")}`}>
+            <span className="inline-flex items-center gap-1">
+              <Calendar size={10} aria-hidden="true" />
+              <span>{format(postedDate, "MM/dd/yy")}</span>
+            </span>
+          </Tooltip>
+        )}
+        {point.teamName && point.isViewerTeamMember && (
+          <Tooltip
+            content={`You are a member of this team: ${point.teamName}`}
+          >
+            <span className="inline-flex items-center">
+              <Users
+                size={10}
+                className="shrink-0 text-success"
+                aria-hidden="true"
+              />
+            </span>
+          </Tooltip>
+        )}
+        {point.hasInvitation && (
+          <Tooltip content="You were invited to fill this role">
+            {statusIcon({
+              ariaLabel: "Open role invitation details",
+              onClick: point.roleInvitation && onOpenInvitation
+                ? () => onOpenInvitation(point.roleInvitation)
+                : null,
+              children: <Mail size={10} className="text-orange-500" aria-hidden="true" />,
+            })}
+          </Tooltip>
+        )}
+        {point.hasApplied && (
+          <Tooltip content="You applied for this role">
+            {statusIcon({
+              ariaLabel: "Open role application details",
+              onClick: point.roleApplication && onOpenApplication
+                ? () => onOpenApplication(point.roleApplication)
+                : null,
+              children: <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />,
+            })}
+          </Tooltip>
+        )}
+      </div>
+    );
+  }
+
+  if (!isValidDate && !point.hasApplied && !point.hasInvitation && !point.teamName) return null;
 
   return (
     <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
@@ -883,17 +1258,44 @@ const RoleSubline = ({ point }) => {
           </span>
         </Tooltip>
       )}
-      {point.hasApplied && (
-        <Tooltip content="You applied for this role">
-          <span className="inline-flex">
-            <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />
-          </span>
-        </Tooltip>
-      )}
       {point.hasInvitation && (
         <Tooltip content="You were invited to fill this role">
-          <span className="inline-flex">
-            <Mail size={10} className="text-orange-500" aria-hidden="true" />
+          {statusIcon({
+            ariaLabel: "Open role invitation details",
+            onClick: point.roleInvitation && onOpenInvitation
+              ? () => onOpenInvitation(point.roleInvitation)
+              : null,
+            children: <Mail size={10} className="text-orange-500" aria-hidden="true" />,
+          })}
+        </Tooltip>
+      )}
+      {point.hasApplied && (
+        <Tooltip content="You applied for this role">
+          {statusIcon({
+            ariaLabel: "Open role application details",
+            onClick: point.roleApplication && onOpenApplication
+              ? () => onOpenApplication(point.roleApplication)
+              : null,
+            children: <SendHorizontal size={10} className="text-orange-500" aria-hidden="true" />,
+          })}
+        </Tooltip>
+      )}
+      {point.teamName && (
+        <Tooltip
+          content={
+            point.isViewerTeamMember
+              ? `You are a member of this team: ${point.teamName}`
+              : point.teamName
+          }
+          wrapperClassName="inline-flex min-w-0 max-w-[9rem] overflow-hidden"
+        >
+          <span className="inline-flex min-w-0 max-w-full items-center gap-0.5 overflow-hidden">
+            <Users
+              size={10}
+              className={`shrink-0 ${point.isViewerTeamMember ? "text-success" : ""}`}
+              aria-hidden="true"
+            />
+            <span className="truncate">{point.teamName}</span>
           </span>
         </Tooltip>
       )}
@@ -901,7 +1303,12 @@ const RoleSubline = ({ point }) => {
   );
 };
 
-const MapPopupCard = ({ point, onOpenPoint }) => {
+const MapPopupCard = ({
+  point,
+  onOpenPoint,
+  onOpenInvitation,
+  onOpenApplication,
+}) => {
   const map = useMap();
 
   return (
@@ -925,14 +1332,29 @@ const MapPopupCard = ({ point, onOpenPoint }) => {
             {point.name}
           </h3>
           <UserSubline point={point} />
-          <TeamMetaLine point={point} />
-          <RoleSubline point={point} />
+          <TeamMetaLine
+            point={point}
+            onOpenInvitation={onOpenInvitation}
+            onOpenApplication={onOpenApplication}
+          />
+          <RoleSubline
+            point={point}
+            onOpenInvitation={onOpenInvitation}
+            onOpenApplication={onOpenApplication}
+            teamOnly
+          />
         </div>
       </div>
 
       <div className="mt-3 space-y-0.5 text-xs text-base-content/70">
-        {point.teamName && (
-          <div className={`flex items-center gap-1.5 ${point.type === "role" && point.isViewerTeamMember ? "text-success" : ""}`}>
+        {point.teamName && point.type === "role" && (
+          <div className="flex items-center gap-1.5">
+            <Users size={13} aria-hidden="true" />
+            <span>{point.teamName}</span>
+          </div>
+        )}
+        {point.teamName && point.type !== "role" && (
+          <div className="flex items-center gap-1.5">
             <Users size={13} aria-hidden="true" />
             <span>{point.teamName}</span>
           </div>
@@ -985,21 +1407,80 @@ const SearchMapView = ({
   const [fetchedTeamRoles, setFetchedTeamRoles] = useState({});
   const [fetchedApplications, setFetchedApplications] = useState([]);
   const [fetchedInvitations, setFetchedInvitations] = useState([]);
+  const [fetchedUserTeamIds, setFetchedUserTeamIds] = useState(() => new Set());
+  const [selectedInvitation, setSelectedInvitation] = useState(null);
+  const [selectedApplication, setSelectedApplication] = useState(null);
+
+  const fetchUserRequestData = useCallback(async () => {
+    if (!authUserId) {
+      return { applications: [], invitations: [] };
+    }
+
+    const [appsResponse, invResponse] = await Promise.all([
+      teamService.getUserPendingApplications(),
+      teamService.getUserReceivedInvitations(),
+    ]);
+
+    return {
+      applications: Array.isArray(appsResponse?.data) ? appsResponse.data : [],
+      invitations: Array.isArray(invResponse?.data) ? invResponse.data : [],
+    };
+  }, [authUserId]);
+
+  const fetchUserTeamIds = useCallback(async () => {
+    if (!authUserId) return new Set();
+
+    const teamIds = new Set();
+    const limit = 100;
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const response = await teamService.getUserTeams(authUserId, { page, limit });
+      const teams = Array.isArray(response?.data) ? response.data : [];
+
+      teams.forEach((team) => {
+        const teamId = firstPresent(team?.id, team?.teamId, team?.team_id);
+        if (teamId != null) teamIds.add(String(teamId));
+      });
+
+      const pagination = response?.pagination ?? {};
+      const nextTotalPages = Number(
+        pagination.totalPages ?? pagination.total_pages ?? 1,
+      );
+      totalPages =
+        Number.isFinite(nextTotalPages) && nextTotalPages > 0
+          ? nextTotalPages
+          : 1;
+
+      const hasNextPage = Boolean(
+        pagination.hasNextPage ??
+          pagination.has_next_page ??
+          page < totalPages,
+      );
+
+      if (!hasNextPage) break;
+      page += 1;
+    }
+
+    return teamIds;
+  }, [authUserId]);
 
   useEffect(() => {
-    if (!authUserId) return;
+    if (!authUserId) {
+      setFetchedApplications([]);
+      setFetchedInvitations([]);
+      return;
+    }
 
     let isActive = true;
 
     const fetchUserRoleData = async () => {
       try {
-        const [appsResponse, invResponse] = await Promise.all([
-          teamService.getUserPendingApplications(),
-          teamService.getUserReceivedInvitations(),
-        ]);
+        const { applications, invitations } = await fetchUserRequestData();
         if (!isActive) return;
-        setFetchedApplications(Array.isArray(appsResponse?.data) ? appsResponse.data : []);
-        setFetchedInvitations(Array.isArray(invResponse?.data) ? invResponse.data : []);
+        setFetchedApplications(applications);
+        setFetchedInvitations(invitations);
       } catch {
         // silent fail — icon simply won't show if fetch fails
       }
@@ -1008,7 +1489,35 @@ const SearchMapView = ({
     fetchUserRoleData();
 
     return () => { isActive = false; };
-  }, [authUserId]);
+  }, [authUserId, fetchUserRequestData]);
+
+  useEffect(() => {
+    if (!authUserId) {
+      setFetchedUserTeamIds(new Set());
+      return;
+    }
+
+    let isActive = true;
+
+    const loadUserTeamIds = async () => {
+      try {
+        const teamIds = await fetchUserTeamIds();
+        if (isActive) {
+          setFetchedUserTeamIds(teamIds);
+        }
+      } catch {
+        if (isActive) {
+          setFetchedUserTeamIds(new Set());
+        }
+      }
+    };
+
+    loadUserTeamIds();
+
+    return () => {
+      isActive = false;
+    };
+  }, [authUserId, fetchUserTeamIds]);
 
   useEffect(() => {
     if (!authUserId) return;
@@ -1060,12 +1569,80 @@ const SearchMapView = ({
     };
   }, [authUserId, fetchedTeamRoles, items]);
 
+  const refreshUserStatusData = useCallback(async () => {
+    const [{ applications, invitations }, teamIds] = await Promise.all([
+      fetchUserRequestData(),
+      fetchUserTeamIds(),
+    ]);
+
+    setFetchedApplications(applications);
+    setFetchedInvitations(invitations);
+    setFetchedUserTeamIds(teamIds);
+    setFetchedTeamRoles({});
+  }, [fetchUserRequestData, fetchUserTeamIds]);
+
+  const openInvitationDetails = useCallback((invitation) => {
+    if (!invitation) return;
+    setSelectedInvitation(invitation);
+  }, []);
+
+  const openApplicationDetails = useCallback((application) => {
+    if (!application) return;
+    setSelectedApplication(application);
+  }, []);
+
+  const handleInvitationAccept = useCallback(async (
+    invitationId,
+    responseMessage = "",
+    fillRole = false,
+  ) => {
+    await teamService.respondToInvitation(
+      invitationId,
+      "accept",
+      responseMessage,
+      fillRole,
+    );
+    await refreshUserStatusData();
+    setSelectedInvitation(null);
+  }, [refreshUserStatusData]);
+
+  const handleInvitationDecline = useCallback(async (
+    invitationId,
+    responseMessage = "",
+  ) => {
+    await teamService.respondToInvitation(
+      invitationId,
+      "decline",
+      responseMessage,
+    );
+    await refreshUserStatusData();
+    setSelectedInvitation(null);
+  }, [refreshUserStatusData]);
+
+  const handleApplicationCancel = useCallback(async (applicationId) => {
+    await teamService.cancelApplication(applicationId);
+    await refreshUserStatusData();
+    setSelectedApplication(null);
+  }, [refreshUserStatusData]);
+
+  const handleApplicationReminder = useCallback(async () => {
+    window.alert("Reminder feature coming soon!");
+  }, []);
+
   const normalizedPoints = useMemo(
     () =>
       items
-        .map((item) => normalizeMapPoint(item, { id: authUserId }, fetchedTeamRoles, fetchedApplications, fetchedInvitations))
+        .map((item) =>
+          normalizeMapPoint(
+            item,
+            { id: authUserId },
+            fetchedTeamRoles,
+            fetchedApplications,
+            fetchedInvitations,
+            fetchedUserTeamIds,
+          ))
         .filter(Boolean),
-    [authUserId, fetchedTeamRoles, fetchedApplications, fetchedInvitations, items],
+    [authUserId, fetchedTeamRoles, fetchedApplications, fetchedInvitations, fetchedUserTeamIds, items],
   );
   const markerPoints = normalizedPoints.filter((point) => point.hasCoordinates);
   const fallbackPoints = normalizedPoints.filter((point) => !point.hasCoordinates);
@@ -1173,7 +1750,12 @@ const SearchMapView = ({
                     minWidth={0}
                     maxWidth={352}
                   >
-                    <MapPopupCard point={point} onOpenPoint={openPoint} />
+                    <MapPopupCard
+                      point={point}
+                      onOpenPoint={openPoint}
+                      onOpenInvitation={openInvitationDetails}
+                      onOpenApplication={openApplicationDetails}
+                    />
                   </Popup>
                 </Marker>
               ))}
@@ -1226,9 +1808,17 @@ const SearchMapView = ({
                       }
                       wrapperClassName="block"
                     >
-                      <button
-                        type="button"
+                      <div
+                        role="button"
+                        tabIndex={0}
                         onClick={() => openPoint(point)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openPoint(point);
+                          }
+                        }}
                         className="w-full rounded-lg border border-base-200 bg-white/80 p-2 text-left shadow-soft transition-all duration-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -1254,18 +1844,44 @@ const SearchMapView = ({
                             <h5 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
                               {point.name}
                             </h5>
-                            <UserSubline point={point} />
-                            <TeamMetaLine point={point} withTooltips={false} />
-                            <RoleSubline point={point} />
+                            <div
+                              onMouseEnter={() => setActiveStatusTooltipPointId(point.id)}
+                              onMouseLeave={() => setActiveStatusTooltipPointId(null)}
+                              onFocusCapture={() => setActiveStatusTooltipPointId(point.id)}
+                              onBlurCapture={() => setActiveStatusTooltipPointId(null)}
+                            >
+                              <UserSubline point={point} />
+                              <TeamMetaLine
+                                point={point}
+                                onOpenInvitation={openInvitationDetails}
+                                onOpenApplication={openApplicationDetails}
+                              />
+                              <RoleSubline
+                                point={point}
+                                onOpenInvitation={openInvitationDetails}
+                                onOpenApplication={openApplicationDetails}
+                                teamOnly={point.type === "role"}
+                              />
+                            </div>
                           </div>
                         </div>
-                        {point.teamName && (
-                          <div className={`mt-2 flex items-center gap-1.5 text-xs ${point.type === "role" && point.isViewerTeamMember ? "text-success" : "text-base-content/70"}`}>
+                        {point.type === "role" && (
+                          <div className="mt-2 space-y-0.5 text-xs text-base-content/70">
+                            {point.teamName && (
+                              <div className="flex items-center gap-1.5">
+                                <Users size={13} aria-hidden="true" />
+                                <span className="min-w-0 flex-1 truncate">{point.teamName}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {point.teamName && point.type !== "role" && (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-base-content/70">
                             <Users size={13} aria-hidden="true" />
                             <span className="min-w-0 flex-1 truncate">{point.teamName}</span>
                           </div>
                         )}
-                      </button>
+                      </div>
                     </Tooltip>
                   ))}
                 </div>
@@ -1275,6 +1891,26 @@ const SearchMapView = ({
           </aside>
         </div>
       </div>
+
+      {selectedInvitation && (
+        <TeamInvitationDetailsModal
+          isOpen={true}
+          invitation={selectedInvitation}
+          onClose={() => setSelectedInvitation(null)}
+          onAccept={handleInvitationAccept}
+          onDecline={handleInvitationDecline}
+        />
+      )}
+
+      {selectedApplication && (
+        <TeamApplicationDetailsModal
+          isOpen={true}
+          application={selectedApplication}
+          onClose={() => setSelectedApplication(null)}
+          onCancel={handleApplicationCancel}
+          onSendReminder={handleApplicationReminder}
+        />
+      )}
 
       {selectedRolePoint && (
         <VacantRoleDetailsModal
