@@ -109,6 +109,12 @@ const normalizeRoleValue = (value) => {
 const isTruthyValue = (value) =>
   value === true || value === 1 || value === "true" || value === "1";
 
+const normalizeBooleanFlag = (value) => {
+  if (value === true || value === 1 || value === "true" || value === "1") return true;
+  if (value === false || value === 0 || value === "false" || value === "0") return false;
+  return false;
+};
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -307,8 +313,10 @@ const getTeamViewerRole = (item, viewerUser = null) => {
   return null;
 };
 
-const getTeamIsPublic = (item) =>
-  isTruthyValue(firstPresent(item?.is_public, item?.isPublic));
+const getTeamIsPublic = (item) => {
+  const raw = firstPresent(item?.is_public, item?.isPublic);
+  return normalizeBooleanFlag(raw);
+};
 
 const coordinatesMatchCountry = (lat, lng, countryCode) => {
   if (!countryCode) return true;
@@ -743,7 +751,9 @@ const normalizeMapPoint = (
     initials: avatarData.initials,
     isDemo: isDemoPoint(item, type),
     username: type === "user" ? (item.username ?? null) : null,
-    isPublicProfile: type === "user" ? isTruthyValue(firstPresent(item?.is_public, item?.isPublic)) : null,
+    isPublicProfile: type === "user"
+      ? normalizeBooleanFlag(firstPresent(item?.is_public, item?.isPublic))
+      : null,
     isOwnProfile: type === "user" && rawId != null && viewerUser?.id != null
       ? String(rawId) === String(viewerUser.id)
       : false,
