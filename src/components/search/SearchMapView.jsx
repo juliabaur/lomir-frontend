@@ -2690,9 +2690,13 @@ const SearchMapView = ({
       });
       return;
     }
-
     setSelectedRolePoint(point);
   };
+
+  const selectedRolePointForModal = selectedRolePoint
+    ? normalizedPoints.find((point) => point.id === selectedRolePoint.id) ??
+      selectedRolePoint
+    : null;
 
   return (
     <div className="space-y-4">
@@ -3014,29 +3018,31 @@ const SearchMapView = ({
         />
       )}
 
-      {selectedRolePoint && (
+      {selectedRolePointForModal && (
         <VacantRoleDetailsModal
           isOpen={true}
           onClose={() => setSelectedRolePoint(null)}
-          role={selectedRolePoint.item}
+          role={selectedRolePointForModal.item}
           team={{
-            id: selectedRolePoint.item.teamId ?? selectedRolePoint.item.team_id,
-            name: selectedRolePoint.teamName,
+            id:
+              selectedRolePointForModal.item.teamId ??
+              selectedRolePointForModal.item.team_id,
+            name: selectedRolePointForModal.teamName,
             teamavatar_url:
-              selectedRolePoint.item.teamAvatarUrl ??
-              selectedRolePoint.item.team_avatar_url,
+              selectedRolePointForModal.item.teamAvatarUrl ??
+              selectedRolePointForModal.item.team_avatar_url,
           }}
           matchScore={
-            selectedRolePoint.item.bestMatchScore ??
-            selectedRolePoint.item.best_match_score ??
+            selectedRolePointForModal.item.bestMatchScore ??
+            selectedRolePointForModal.item.best_match_score ??
             null
           }
           matchDetails={
-            selectedRolePoint.item.matchDetails ??
-            selectedRolePoint.item.match_details ??
+            selectedRolePointForModal.item.matchDetails ??
+            selectedRolePointForModal.item.match_details ??
             null
           }
-          hideActions
+          isTeamMember={selectedRolePointForModal.isViewerTeamMember}
         />
       )}
     </div>
