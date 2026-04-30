@@ -5,7 +5,6 @@ import {
   MapContainer,
   Marker,
   TileLayer,
-  Tooltip as LeafletTooltip,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
@@ -38,6 +37,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { teamService } from "../../services/teamService";
 import { userService } from "../../services/userService";
 import { getResultMatchScore } from "../../utils/teamMatchUtils";
+import { getMatchTier } from "../../utils/matchScoreUtils";
 import {
   getTeamInitials,
   getUserInitials,
@@ -86,6 +86,7 @@ const MAP_POPUP_GAP = 14;
 const MAP_POPUP_VIEWPORT_PADDING = 12;
 const MAP_POPUP_ARROW_EDGE_PADDING = 14;
 const MAP_MARKER_HALF_HEIGHT = 17;
+const MAP_MARKER_TOOLTIP_GAP = 8;
 const MAP_POPUP_ARROW_MASK = `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.500009 1C3.5 1 3.00001 7 6.00001 7C9 7 8.5 1 11.5 1C12 1 12 0.5 12 0H0C0 0.5 0 1 0.500009 1Z' fill='white'/%3E%3C/svg%3E")`;
 const COUNTRY_COORDINATE_BOUNDS = {
   CA: { minLat: 41.6, maxLat: 83.2, minLng: -141.1, maxLng: -52.6 },
@@ -815,13 +816,61 @@ const getTypeTooltipLabel = (type) => {
   return "User Profile";
 };
 
-const buildMarkerIcon = (point, searchType = "all") => {
+const getMarkerMatchIconMarkup = (matchTier) => {
+  if (matchTier.label === "Great match") {
+    return `
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+      <path d="M20 3v4" />
+      <path d="M22 5h-4" />
+      <path d="M4 17v2" />
+      <path d="M5 18H3" />
+    `;
+  }
+
+  if (matchTier.label === "Good match") {
+    return `
+      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+      <polyline points="16 7 22 7 22 13" />
+    `;
+  }
+
+  return `
+    <polyline points="22 17 13.5 8.5 8.5 13.5 2 7" />
+    <polyline points="16 17 22 17 22 11" />
+  `;
+};
+
+const getMarkerMatchBadgeMarkup = (point, showMatchScore = false) => {
+  if (!showMatchScore) return "";
+
+  const matchTier = getMatchTier(getResultMatchScore(point?.item));
+
+  return `
+    <span class="lomir-map-marker-match-badge ${matchTier.bg}">
+      <svg
+        class="lomir-map-marker-match-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="3"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        ${getMarkerMatchIconMarkup(matchTier)}
+      </svg>
+    </span>
+  `;
+};
+
+const buildMarkerIcon = (point, searchType = "all", showMatchScore = false) => {
   const initials = escapeHtml(point.initials);
   const markerColor = getMapEntityColor(point, searchType);
   const imageMarkup = point.imageUrl
     ? `<img src="${escapeHtml(point.imageUrl)}" alt="" class="lomir-map-marker-avatar-image" onerror="this.style.display='none'" />`
     : "";
   const demoMarkup = point.isDemo ? getMarkerDemoLabelMarkup(Boolean(point.imageUrl)) : "";
+  const matchBadgeMarkup = getMarkerMatchBadgeMarkup(point, showMatchScore);
 
   return L.divIcon({
     className: "lomir-map-marker",
@@ -832,9 +881,12 @@ const buildMarkerIcon = (point, searchType = "all") => {
         aria-hidden="true"
       >
         <span class="lomir-map-marker-avatar">
-          <span class="lomir-map-marker-avatar-fallback">${initials}</span>
-          ${imageMarkup}
-          ${demoMarkup}
+          <span class="lomir-map-marker-avatar-clip">
+            <span class="lomir-map-marker-avatar-fallback">${initials}</span>
+            ${imageMarkup}
+            ${demoMarkup}
+          </span>
+          ${matchBadgeMarkup}
         </span>
       </span>
     `,
@@ -1132,53 +1184,86 @@ const MapInstanceCapture = ({ onReady }) => {
   return null;
 };
 
-const MarkerTooltipContent = ({ point }) => {
+const MarkerTooltipContent = ({ point, showMatchScore = false }) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
   const Icon = meta.Icon;
+  const matchTier = showMatchScore
+    ? getMatchTier(getResultMatchScore(point.item))
+    : null;
+  const MatchIcon = matchTier?.Icon ?? null;
 
   return (
-    <div className="flex items-center gap-1.5">
-      <Icon size={13} className="block shrink-0" aria-hidden="true" />
-      <span className="font-medium leading-none">{point.name}</span>
-      {point.isDemo && (
-        <FlaskConical
-          size={11}
-          strokeWidth={2.25}
-          className="block shrink-0"
-          aria-hidden="true"
-        />
+    <div className="flex flex-col items-center gap-1 text-center">
+      <div className="flex items-center justify-center gap-1.5">
+        <Icon size={13} className="block shrink-0" aria-hidden="true" />
+        <span className="font-medium leading-none">{point.name}</span>
+        {point.isDemo && (
+          <FlaskConical
+            size={11}
+            strokeWidth={2.25}
+            className="block shrink-0"
+            aria-hidden="true"
+          />
+        )}
+      </div>
+      {MatchIcon && (
+        <div className="inline-flex shrink-0 items-center justify-center gap-0.5 font-normal leading-none">
+          <MatchIcon
+            size={11}
+            className={`block ${matchTier.text}`}
+            aria-hidden="true"
+          />
+          <span className="text-black">{matchTier.pct}%</span>
+        </div>
       )}
     </div>
   );
 };
 
-const PopupAvatar = ({ point, backgroundColor = null }) => {
+const PopupAvatar = ({
+  point,
+  backgroundColor = null,
+  showMatchScore = false,
+}) => {
   const meta = TYPE_META[point.type] ?? TYPE_META.team;
   const avatarColor = backgroundColor ?? meta.color;
+  const matchTier = showMatchScore
+    ? getMatchTier(getResultMatchScore(point.item))
+    : null;
+  const MatchIcon = matchTier?.Icon ?? null;
 
   return (
     <span
-      className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white shadow-soft ring-2 ring-white"
       style={{
         backgroundColor: avatarColor,
         "--tw-ring-color": avatarColor,
       }}
       aria-hidden="true"
     >
-      <span>{point.initials}</span>
-      {point.imageUrl && (
-        <img
-          src={point.imageUrl}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ backgroundColor: avatarColor }}
-        />
-      )}
-      {point.isDemo && (
-        <DemoAvatarOverlay
-          textClassName="text-[6px]"
-          textTranslateClassName="-translate-y-[2px]"
-        />
+      <span className="absolute inset-0 flex items-center justify-center overflow-hidden rounded-full">
+        <span>{point.initials}</span>
+        {point.imageUrl && (
+          <img
+            src={point.imageUrl}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ backgroundColor: avatarColor }}
+          />
+        )}
+        {point.isDemo && (
+          <DemoAvatarOverlay
+            textClassName="text-[6px]"
+            textTranslateClassName="-translate-y-[2px]"
+          />
+        )}
+      </span>
+      {MatchIcon && (
+        <span
+          className={`absolute -top-0.5 -left-0.5 z-10 flex h-[14px] w-[14px] items-center justify-center rounded-full text-white ring-2 ring-white ${matchTier.bg}`}
+        >
+          <MatchIcon size={7} className="text-white" strokeWidth={2.5} />
+        </span>
       )}
     </span>
   );
@@ -1301,6 +1386,77 @@ const LocationStatusIndicator = ({ point }) => {
   );
 };
 
+const getPointMatchDetails = (point) =>
+  point?.item?.matchDetails ?? point?.item?.match_details ?? null;
+
+const getPointMatchTooltip = (point, matchTier) => {
+  const matchDetails = getPointMatchDetails(point);
+  const matchType = point?.item?.matchType ?? point?.item?.match_type ?? null;
+  const matchLabel = matchType === "role_match" ? "role match" : "match";
+
+  if (
+    matchDetails &&
+    ((matchDetails.tagScore ?? matchDetails.tag_score) != null ||
+      (matchDetails.badgeScore ?? matchDetails.badge_score) != null ||
+      (matchDetails.distanceScore ?? matchDetails.distance_score) != null)
+  ) {
+    const tagPct = Math.round(
+      (matchDetails.tagScore ?? matchDetails.tag_score ?? 0) * 100,
+    );
+    const badgePct = Math.round(
+      (matchDetails.badgeScore ?? matchDetails.badge_score ?? 0) * 100,
+    );
+    const distPct = Math.round(
+      (matchDetails.distanceScore ?? matchDetails.distance_score ?? 0) * 100,
+    );
+
+    return `${matchTier.pct}% ${matchLabel} — Tags ${tagPct}% · Badges ${badgePct}% · Location ${distPct}%`;
+  }
+
+  if (matchDetails) {
+    const sharedTags =
+      matchDetails.sharedTagCount ?? matchDetails.shared_tag_count ?? 0;
+    const sharedBadges =
+      matchDetails.sharedBadgeCount ?? matchDetails.shared_badge_count ?? 0;
+
+    if (sharedTags > 0 || sharedBadges > 0) {
+      return `${matchTier.pct}% profile match — ${sharedTags} shared tags, ${sharedBadges} shared badges`;
+    }
+  }
+
+  const fallbackMatchLabel =
+    matchType === "role_match"
+      ? "role match"
+      : point?.type === "role"
+        ? "match"
+        : "profile match";
+
+  return `${matchTier.pct}% ${fallbackMatchLabel}`;
+};
+
+const MatchScoreSublineItem = ({ point, showMatchScore = false }) => {
+  if (!showMatchScore) return null;
+
+  const rawScore = getResultMatchScore(point?.item);
+  if (rawScore == null) return null;
+
+  const matchTier = getMatchTier(rawScore);
+  const MatchIcon = matchTier.Icon;
+
+  return (
+    <Tooltip content={getPointMatchTooltip(point, matchTier)}>
+      <span className="inline-flex items-center gap-0.5 whitespace-nowrap font-normal leading-none">
+        <MatchIcon
+          size={POPUP_SUBLINE_ICON_SIZE}
+          className={`${matchTier.text} shrink-0`}
+          aria-hidden="true"
+        />
+        <span className="font-normal text-base-content">{matchTier.pct}%</span>
+      </span>
+    </Tooltip>
+  );
+};
+
 const TeamMetaItem = ({
   tooltip = null,
   children,
@@ -1360,6 +1516,7 @@ const getTeamRoleTooltip = (role) => {
 
 const TeamMetaLine = ({
   point,
+  showMatchScore = false,
   withTooltips = true,
   showRoleRequestNames = true,
   onOpenInvitation = null,
@@ -1368,6 +1525,12 @@ const TeamMetaLine = ({
   if (point.type !== "team") return null;
 
   const memberLabel = `${point.memberCount}/${point.maxMembers}`;
+  const scoreItem = showMatchScore ? (
+    <MatchScoreSublineItem
+      point={point}
+      showMatchScore={showMatchScore}
+    />
+  ) : null;
   const roleTooltip = getTeamRoleTooltip(point.currentUserRole);
   const roleInvitationTooltip = point.teamRoleInvitationName
     ? `You were invited to fill ${point.teamRoleInvitationName} in this team`
@@ -1392,7 +1555,8 @@ const TeamMetaLine = ({
   };
 
   return (
-    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
+    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-normal text-base-content/60">
+      {scoreItem}
       <TeamMetaItem
         tooltip={
           point.currentUserRole
@@ -1488,12 +1652,21 @@ const TeamMetaLine = ({
   );
 };
 
-const UserSubline = ({ point }) => {
+const UserSubline = ({ point, showMatchScore = false }) => {
   if (point.type !== "user") return null;
-  if (!point.username && !point.isOwnProfile) return null;
+
+  const scoreItem = showMatchScore ? (
+    <MatchScoreSublineItem
+      point={point}
+      showMatchScore={showMatchScore}
+    />
+  ) : null;
+
+  if (!point.username && !point.isOwnProfile && !scoreItem) return null;
 
   return (
-    <div className="mt-0.5 flex items-center gap-0.5 text-[11px] font-medium text-base-content/60">
+    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-normal text-base-content/60">
+      {scoreItem}
       {point.username && <span>@{point.username}</span>}
       {point.isOwnProfile && (
         <Tooltip content={point.isPublicProfile ? "Public Profile - visible for everyone" : "Private Profile - only visible for you"}>
@@ -1511,6 +1684,7 @@ const UserSubline = ({ point }) => {
 
 const RoleSubline = ({
   point,
+  showMatchScore = false,
   onOpenInvitation = null,
   onOpenApplication = null,
   teamOnly = false,
@@ -1519,6 +1693,12 @@ const RoleSubline = ({
 
   const postedDate = point.postedAt ? new Date(point.postedAt) : null;
   const isValidDate = postedDate && !isNaN(postedDate);
+  const scoreItem = showMatchScore ? (
+    <MatchScoreSublineItem
+      point={point}
+      showMatchScore={showMatchScore}
+    />
+  ) : null;
   const statusIcon = ({ children, onClick, ariaLabel }) => {
     if (!onClick) {
       return <span className="inline-flex">{children}</span>;
@@ -1540,10 +1720,11 @@ const RoleSubline = ({
   };
 
   if (teamOnly) {
-    if (!point.isViewerTeamMember && !isValidDate && !point.hasInvitation && !point.hasApplied) return null;
+    if (!scoreItem && !point.isViewerTeamMember && !isValidDate && !point.hasInvitation && !point.hasApplied) return null;
 
     return (
-      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
+      <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-normal text-base-content/60">
+        {scoreItem}
         {isValidDate && (
           <Tooltip content={`Posted ${format(postedDate, "MMM d, yyyy")}`}>
             <span className="inline-flex items-center gap-1">
@@ -1591,10 +1772,11 @@ const RoleSubline = ({
     );
   }
 
-  if (!isValidDate && !point.hasApplied && !point.hasInvitation && !point.teamName) return null;
+  if (!scoreItem && !isValidDate && !point.hasApplied && !point.hasInvitation && !point.teamName) return null;
 
   return (
-    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-medium text-base-content/60">
+    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] font-normal text-base-content/60">
+      {scoreItem}
       {isValidDate && (
         <Tooltip content={`Posted ${format(postedDate, "MMM d, yyyy")}`}>
           <span className="inline-flex items-center gap-1">
@@ -1650,6 +1832,7 @@ const RoleSubline = ({
 
 const MapPopupCard = ({
   point,
+  showMatchScore = false,
   onOpenPoint,
   onOpenInvitation,
   onOpenApplication,
@@ -1675,14 +1858,16 @@ const MapPopupCard = ({
           <h3 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
             {point.name}
           </h3>
-          <UserSubline point={point} />
+          <UserSubline point={point} showMatchScore={showMatchScore} />
           <TeamMetaLine
             point={point}
+            showMatchScore={showMatchScore}
             onOpenInvitation={onOpenInvitation}
             onOpenApplication={onOpenApplication}
           />
           <RoleSubline
             point={point}
+            showMatchScore={showMatchScore}
             onOpenInvitation={onOpenInvitation}
             onOpenApplication={onOpenApplication}
             teamOnly
@@ -1756,11 +1941,16 @@ const SearchMapView = ({
   const [selectedApplication, setSelectedApplication] = useState(null);
   const [mapInstance, setMapInstance] = useState(null);
   const [activePopupPointId, setActivePopupPointId] = useState(null);
+  const [activeMarkerTooltipPointId, setActiveMarkerTooltipPointId] = useState(null);
   const [popupAnchor, setPopupAnchor] = useState(null);
   const [popupCoords, setPopupCoords] = useState(null);
   const [popupPlacement, setPopupPlacement] = useState("top");
+  const [markerTooltipAnchor, setMarkerTooltipAnchor] = useState(null);
+  const [markerTooltipCoords, setMarkerTooltipCoords] = useState(null);
+  const [markerTooltipPlacement, setMarkerTooltipPlacement] = useState("top");
   const [userLocationDetailsById, setUserLocationDetailsById] = useState({});
   const popupRef = useRef(null);
+  const markerTooltipRef = useRef(null);
   const userLocationFetchesRef = useRef(new Set());
   const isMountedRef = useRef(false);
 
@@ -2097,14 +2287,29 @@ const SearchMapView = ({
       markerPoints.find((point) => point.id === activePopupPointId) ?? null,
     [activePopupPointId, markerPoints],
   );
+  const activeMarkerTooltipPoint = useMemo(
+    () =>
+      markerPoints.find((point) => point.id === activeMarkerTooltipPointId) ??
+      null,
+    [activeMarkerTooltipPointId, markerPoints],
+  );
   const activePointId = activePoint?.id ?? null;
   const activePointLat = activePoint?.lat ?? null;
   const activePointLng = activePoint?.lng ?? null;
+  const activeMarkerTooltipPointIdResolved = activeMarkerTooltipPoint?.id ?? null;
+  const activeMarkerTooltipPointLat = activeMarkerTooltipPoint?.lat ?? null;
+  const activeMarkerTooltipPointLng = activeMarkerTooltipPoint?.lng ?? null;
   const closeActivePopup = useCallback(() => {
     setActivePopupPointId(null);
     setPopupAnchor(null);
     setPopupCoords(null);
     setPopupPlacement("top");
+  }, []);
+  const closeMarkerTooltip = useCallback(() => {
+    setActiveMarkerTooltipPointId(null);
+    setMarkerTooltipAnchor(null);
+    setMarkerTooltipCoords(null);
+    setMarkerTooltipPlacement("top");
   }, []);
 
   useEffect(() => {
@@ -2112,6 +2317,16 @@ const SearchMapView = ({
       closeActivePopup();
     }
   }, [activePopupPointId, activePoint, closeActivePopup]);
+
+  useEffect(() => {
+    if (activeMarkerTooltipPointId && !activeMarkerTooltipPoint) {
+      closeMarkerTooltip();
+    }
+  }, [
+    activeMarkerTooltipPointId,
+    activeMarkerTooltipPoint,
+    closeMarkerTooltip,
+  ]);
 
   useEffect(() => {
     if (!mapInstance || activePointLat === null || activePointLng === null) {
@@ -2157,6 +2372,65 @@ const SearchMapView = ({
       window.removeEventListener("resize", updatePopupAnchor);
     };
   }, [mapInstance, activePointId, activePointLat, activePointLng, closeActivePopup]);
+
+  useEffect(() => {
+    if (
+      !mapInstance ||
+      activeMarkerTooltipPointLat === null ||
+      activeMarkerTooltipPointLng === null
+    ) {
+      setMarkerTooltipAnchor(null);
+      setMarkerTooltipCoords(null);
+      return undefined;
+    }
+
+    setMarkerTooltipCoords(null);
+
+    const updateMarkerTooltipAnchor = () => {
+      const latLng = L.latLng(
+        activeMarkerTooltipPointLat,
+        activeMarkerTooltipPointLng,
+      );
+
+      if (!mapInstance.getBounds().contains(latLng)) {
+        closeMarkerTooltip();
+        return;
+      }
+
+      const containerPoint = mapInstance.latLngToContainerPoint(latLng);
+      const mapRect = mapInstance.getContainer().getBoundingClientRect();
+      const nextAnchor = {
+        x: mapRect.left + containerPoint.x,
+        y: mapRect.top + containerPoint.y,
+      };
+
+      setMarkerTooltipAnchor((previousAnchor) =>
+        previousAnchor?.x === nextAnchor.x &&
+        previousAnchor?.y === nextAnchor.y
+          ? previousAnchor
+          : nextAnchor,
+      );
+    };
+
+    updateMarkerTooltipAnchor();
+    mapInstance.on("move", updateMarkerTooltipAnchor);
+    mapInstance.on("zoom", updateMarkerTooltipAnchor);
+    mapInstance.on("zoomend", updateMarkerTooltipAnchor);
+    window.addEventListener("resize", updateMarkerTooltipAnchor);
+
+    return () => {
+      mapInstance.off("move", updateMarkerTooltipAnchor);
+      mapInstance.off("zoom", updateMarkerTooltipAnchor);
+      mapInstance.off("zoomend", updateMarkerTooltipAnchor);
+      window.removeEventListener("resize", updateMarkerTooltipAnchor);
+    };
+  }, [
+    mapInstance,
+    activeMarkerTooltipPointIdResolved,
+    activeMarkerTooltipPointLat,
+    activeMarkerTooltipPointLng,
+    closeMarkerTooltip,
+  ]);
 
   const calculatePopupPosition = useCallback(() => {
     if (!popupAnchor || !popupRef.current) return;
@@ -2204,10 +2478,68 @@ const SearchMapView = ({
     );
   }, [popupAnchor]);
 
+  const calculateMarkerTooltipPosition = useCallback(() => {
+    if (!markerTooltipAnchor || !markerTooltipRef.current) return;
+
+    const tooltipRect = markerTooltipRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const tooltipWidth = tooltipRect.width;
+    const tooltipHeight = tooltipRect.height;
+
+    let placement = "top";
+    let top =
+      markerTooltipAnchor.y -
+      MAP_MARKER_HALF_HEIGHT -
+      tooltipHeight -
+      MAP_MARKER_TOOLTIP_GAP;
+    let left = markerTooltipAnchor.x - tooltipWidth / 2;
+
+    if (top < MAP_POPUP_VIEWPORT_PADDING) {
+      placement = "bottom";
+      top =
+        markerTooltipAnchor.y +
+        MAP_MARKER_HALF_HEIGHT +
+        MAP_MARKER_TOOLTIP_GAP;
+    }
+
+    const maxLeft = Math.max(
+      MAP_POPUP_VIEWPORT_PADDING,
+      viewportWidth - tooltipWidth - MAP_POPUP_VIEWPORT_PADDING,
+    );
+    const maxTop = Math.max(
+      MAP_POPUP_VIEWPORT_PADDING,
+      viewportHeight - tooltipHeight - MAP_POPUP_VIEWPORT_PADDING,
+    );
+
+    left = Math.max(MAP_POPUP_VIEWPORT_PADDING, Math.min(left, maxLeft));
+    top = Math.max(MAP_POPUP_VIEWPORT_PADDING, Math.min(top, maxTop));
+
+    setMarkerTooltipPlacement((previousPlacement) =>
+      previousPlacement === placement ? previousPlacement : placement,
+    );
+    setMarkerTooltipCoords((previousCoords) =>
+      previousCoords?.top === top &&
+      previousCoords?.left === left &&
+      previousCoords?.width === tooltipWidth
+        ? previousCoords
+        : { top, left, width: tooltipWidth },
+    );
+  }, [markerTooltipAnchor]);
+
   useLayoutEffect(() => {
     if (!activePopupPointId || !popupAnchor) return;
     calculatePopupPosition();
   }, [activePopupPointId, popupAnchor, calculatePopupPosition]);
+
+  useLayoutEffect(() => {
+    if (!activeMarkerTooltipPointId || !markerTooltipAnchor) return;
+    calculateMarkerTooltipPosition();
+  }, [
+    activeMarkerTooltipPointId,
+    markerTooltipAnchor,
+    calculateMarkerTooltipPosition,
+  ]);
 
   useEffect(() => {
     if (!activePopupPointId || !popupAnchor) return undefined;
@@ -2225,6 +2557,27 @@ const SearchMapView = ({
       window.removeEventListener("resize", recalculateOnResize);
     };
   }, [activePopupPointId, popupAnchor, calculatePopupPosition]);
+
+  useEffect(() => {
+    if (!activeMarkerTooltipPointId || !markerTooltipAnchor) return undefined;
+
+    let frameId = null;
+    const recalculateOnResize = () => {
+      if (frameId) window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(calculateMarkerTooltipPosition);
+    };
+
+    window.addEventListener("resize", recalculateOnResize);
+
+    return () => {
+      if (frameId) window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", recalculateOnResize);
+    };
+  }, [
+    activeMarkerTooltipPointId,
+    markerTooltipAnchor,
+    calculateMarkerTooltipPosition,
+  ]);
 
   useEffect(() => {
     if (!activePopupPointId) return undefined;
@@ -2278,6 +2631,15 @@ const SearchMapView = ({
         Math.min(
           popupAnchor.x - popupCoords.left,
           popupCoords.width - MAP_POPUP_ARROW_EDGE_PADDING,
+        ),
+      )
+    : null;
+  const markerTooltipArrowLeft = markerTooltipCoords?.width && markerTooltipAnchor
+    ? Math.max(
+        MAP_POPUP_ARROW_EDGE_PADDING,
+        Math.min(
+          markerTooltipAnchor.x - markerTooltipCoords.left,
+          markerTooltipCoords.width - MAP_POPUP_ARROW_EDGE_PADDING,
         ),
       )
     : null;
@@ -2358,26 +2720,30 @@ const SearchMapView = ({
                 <Marker
                   key={point.id}
                   position={[point.lat, point.lng]}
-                  icon={buildMarkerIcon(point, searchType)}
+                  icon={buildMarkerIcon(point, searchType, showMatchScore)}
                   bubblingMouseEvents={false}
                   eventHandlers={{
                     click: (event) => {
                       event.originalEvent?.stopPropagation?.();
+                      closeMarkerTooltip();
                       setPopupCoords(null);
                       setPopupPlacement("top");
                       setActivePopupPointId(point.id);
                     },
+                    mouseover: () => {
+                      setActiveMarkerTooltipPointId(point.id);
+                    },
+                    mouseout: () => {
+                      closeMarkerTooltip();
+                    },
+                    focus: () => {
+                      setActiveMarkerTooltipPointId(point.id);
+                    },
+                    blur: () => {
+                      closeMarkerTooltip();
+                    },
                   }}
-                >
-                  <LeafletTooltip
-                    className="lomir-map-tooltip"
-                    direction="top"
-                    offset={[0, -34]}
-                    opacity={1}
-                  >
-                    <MarkerTooltipContent point={point} />
-                  </LeafletTooltip>
-                </Marker>
+                />
               ))}
             </MapContainer>
           </div>
@@ -2459,7 +2825,11 @@ const SearchMapView = ({
                           </span>
                         </div>
                         <div className="mt-1 flex items-center gap-1.5">
-                          <PopupAvatar point={point} backgroundColor={DEFAULT_MAP_ENTITY_COLOR} />
+                          <PopupAvatar
+                            point={point}
+                            backgroundColor={DEFAULT_MAP_ENTITY_COLOR}
+                            showMatchScore={showMatchScore}
+                          />
                           <div className="min-w-0 flex-1">
                             <h5 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
                               {point.name}
@@ -2470,15 +2840,17 @@ const SearchMapView = ({
                               onFocusCapture={() => setActiveStatusTooltipPointId(point.id)}
                               onBlurCapture={() => setActiveStatusTooltipPointId(null)}
                             >
-                              <UserSubline point={point} />
+                              <UserSubline point={point} showMatchScore={showMatchScore} />
                               <TeamMetaLine
                                 point={point}
+                                showMatchScore={showMatchScore}
                                 showRoleRequestNames={false}
                                 onOpenInvitation={openInvitationDetails}
                                 onOpenApplication={openApplicationDetails}
                               />
                               <RoleSubline
                                 point={point}
+                                showMatchScore={showMatchScore}
                                 onOpenInvitation={openInvitationDetails}
                                 onOpenApplication={openApplicationDetails}
                                 teamOnly={point.type === "role"}
@@ -2513,6 +2885,32 @@ const SearchMapView = ({
         </div>
       </div>
 
+      {activeMarkerTooltipPoint &&
+        markerTooltipAnchor &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={markerTooltipRef}
+            role="tooltip"
+            data-placement={markerTooltipPlacement}
+            className="lomir-map-hover-tooltip fixed z-[9998]"
+            style={{
+              top: `${markerTooltipCoords ? markerTooltipCoords.top : markerTooltipAnchor.y}px`,
+              left: `${markerTooltipCoords ? markerTooltipCoords.left : markerTooltipAnchor.x}px`,
+              visibility: markerTooltipCoords ? "visible" : "hidden",
+              "--tooltip-arrow-left": markerTooltipArrowLeft
+                ? `${markerTooltipArrowLeft}px`
+                : "50%",
+            }}
+          >
+            <MarkerTooltipContent
+              point={activeMarkerTooltipPoint}
+              showMatchScore={showMatchScore}
+            />
+          </div>,
+          document.body,
+        )}
+
       {activePopupPointId &&
         activePoint &&
         popupAnchor &&
@@ -2534,6 +2932,7 @@ const SearchMapView = ({
           >
             <MapPopupCard
               point={activePoint}
+              showMatchScore={showMatchScore}
               onClose={closeActivePopup}
               onOpenPoint={(point) => {
                 closeActivePopup();

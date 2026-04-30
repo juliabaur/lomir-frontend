@@ -66,18 +66,26 @@
     inset: 3px;
     z-index: 1;
     box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
+    display: block;
+    overflow: visible;
     border-radius: 9999px;
-    background: var(--marker-color);
     color: #ffffff;
     font-size: 9px;
     font-weight: 700;
     line-height: 1;
-    clip-path: circle(50%);
     transform: rotate(45deg);
+  }
+
+  .lomir-map-marker-avatar-clip {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: inherit;
+    background: var(--marker-color);
+    clip-path: circle(50%);
   }
 
   .lomir-map-marker-avatar-fallback {
@@ -133,7 +141,32 @@
     white-space: nowrap;
   }
 
-  .lomir-map-tooltip.leaflet-tooltip {
+  .lomir-map-marker-match-badge {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    z-index: 4;
+    box-sizing: border-box;
+    display: flex;
+    width: 13px;
+    height: 13px;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid #ffffff;
+    border-radius: 9999px;
+    color: #ffffff;
+    box-shadow: 0 1px 4px rgba(3, 63, 5, 0.2);
+    pointer-events: none;
+  }
+
+  .lomir-map-marker-match-icon {
+    display: block;
+    width: 7px;
+    height: 7px;
+  }
+
+  .lomir-map-tooltip.leaflet-tooltip,
+  .lomir-map-hover-tooltip {
     border: 0;
     border-radius: 0.5rem;
     background: #ffffff;
@@ -150,6 +183,30 @@
   .lomir-map-tooltip.leaflet-tooltip::before {
     border-top-color: #ffffff;
     filter: drop-shadow(0 2px 6px rgba(4, 80, 20, 0.12));
+  }
+
+  .lomir-map-hover-tooltip::before {
+    position: absolute;
+    left: var(--tooltip-arrow-left, 50%);
+    width: 0;
+    height: 0;
+    content: "";
+    filter: drop-shadow(0 2px 6px rgba(4, 80, 20, 0.12));
+    transform: translateX(-50%);
+  }
+
+  .lomir-map-hover-tooltip[data-placement="top"]::before {
+    bottom: -6px;
+    border-top: 6px solid #ffffff;
+    border-right: 6px solid transparent;
+    border-left: 6px solid transparent;
+  }
+
+  .lomir-map-hover-tooltip[data-placement="bottom"]::before {
+    top: -6px;
+    border-right: 6px solid transparent;
+    border-bottom: 6px solid #ffffff;
+    border-left: 6px solid transparent;
   }
 }
 
