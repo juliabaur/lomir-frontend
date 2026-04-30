@@ -190,6 +190,9 @@ export const getCountryCode = (countryName) => {
  * @param {Object} entity - User or team object
  * @returns {Object} Normalized location data
  */
+const firstPresent = (...values) =>
+  values.find((value) => value !== null && value !== undefined && value !== "");
+
 export const normalizeLocationData = (entity) => {
   if (!entity) {
     return {
@@ -205,12 +208,29 @@ export const normalizeLocationData = (entity) => {
     };
   }
 
-  const postalCode = entity.postal_code || entity.postalCode || null;
-  const city = entity.city || null;
-  const state = entity.state || null;
-  const country = entity.country || null;
-  const latitude = entity.latitude || null;
-  const longitude = entity.longitude || null;
+  const postalCode = firstPresent(
+    entity.postal_code,
+    entity.postalCode,
+    entity.location?.postal_code,
+    entity.location?.postalCode,
+  ) ?? null;
+  const city = firstPresent(entity.city, entity.location?.city) ?? null;
+  const state = firstPresent(entity.state, entity.location?.state) ?? null;
+  const country = firstPresent(entity.country, entity.location?.country) ?? null;
+  const latitude = firstPresent(
+    entity.latitude,
+    entity.lat,
+    entity.location?.latitude,
+    entity.location?.lat,
+  ) ?? null;
+  const longitude = firstPresent(
+    entity.longitude,
+    entity.lng,
+    entity.lon,
+    entity.location?.longitude,
+    entity.location?.lng,
+    entity.location?.lon,
+  ) ?? null;
   const isRemote = entity.is_remote === true || entity.isRemote === true;
 
   // Determine if we have any location data
@@ -227,6 +247,41 @@ export const normalizeLocationData = (entity) => {
     isRemote,
     hasLocation,
   };
+};
+
+const normalizeComparableLocationValue = (value) =>
+  value == null ? "" : String(value).trim().toLowerCase();
+
+const normalizeComparableCountry = (value) =>
+  getCountryCode(value == null ? null : String(value)) ??
+  normalizeComparableLocationValue(value);
+
+export const locationsHaveDifferentKnownParts = (source, target) => {
+  const from = normalizeLocationData(source);
+  const to = normalizeLocationData(target);
+  const postalCodeFrom = normalizeComparableLocationValue(from.postalCode);
+  const postalCodeTo = normalizeComparableLocationValue(to.postalCode);
+  const cityFrom = normalizeComparableLocationValue(from.city);
+  const cityTo = normalizeComparableLocationValue(to.city);
+  const stateFrom = normalizeComparableLocationValue(from.state);
+  const stateTo = normalizeComparableLocationValue(to.state);
+  const countryFrom = normalizeComparableCountry(from.country);
+  const countryTo = normalizeComparableCountry(to.country);
+
+  const differs = (left, right) => left && right && left !== right;
+
+  if (differs(countryFrom, countryTo) || differs(cityFrom, cityTo)) {
+    return true;
+  }
+
+  if (cityFrom && cityFrom === cityTo) {
+    return false;
+  }
+
+  return (
+    differs(stateFrom, stateTo) ||
+    differs(postalCodeFrom, postalCodeTo)
+  );
 };
 
 /**
@@ -318,6 +373,10 @@ export const hasLocationChanged = (newData, oldData) => {
 };
 
 const toCoordinate = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
@@ -354,7 +413,13 @@ export const calculateDistanceKm = (source, target) => {
       Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return earthRadiusKm * c;
+  const distanceKm = earthRadiusKm * c;
+
+  if (distanceKm <= 0.5 && locationsHaveDifferentKnownParts(source, target)) {
+    return null;
+  }
+
+  return distanceKm;
 };
 
 export default {
@@ -366,4 +431,5 @@ export default {
   formatLocation,
   hasLocationChanged,
   calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
 };

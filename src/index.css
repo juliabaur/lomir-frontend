@@ -49,7 +49,6 @@
     border: 1.5px solid #ffffff;
     border-radius: 9999px 9999px 9999px 0;
     background: var(--marker-color);
-    box-shadow: 0 8px 18px rgba(3, 63, 5, 0.18);
     transform: rotate(-45deg);
   }
 
@@ -155,7 +154,6 @@
     border: 1.5px solid #ffffff;
     border-radius: 9999px;
     color: #ffffff;
-    box-shadow: 0 1px 4px rgba(3, 63, 5, 0.2);
     pointer-events: none;
   }
 

@@ -59,7 +59,10 @@ import {
   enrichTeamMatchData,
 } from "../../utils/teamMatchUtils";
 import { getMatchTier } from "../../utils/matchScoreUtils";
-import { calculateDistanceKm } from "../../utils/locationUtils";
+import {
+  calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
+} from "../../utils/locationUtils";
 import { DEMO_TEAM_TOOLTIP, isSyntheticTeam } from "../../utils/userHelpers";
 
 const normalizeTeamTagIds = (team) => {
@@ -1302,18 +1305,28 @@ const TeamDetailsModal = ({
 
   const effectiveTeamDistanceKm = useMemo(() => {
     const rawDistance = team?.distance_km ?? team?.distanceKm;
-    const numericDistance = Number(rawDistance);
+    const numericDistance =
+      rawDistance != null ? Number(rawDistance) : null;
     const viewerForDistance = distanceViewerUser ?? user;
     const computedDistance = viewerForDistance
       ? calculateDistanceKm(viewerForDistance, team)
       : null;
+    const rawZeroLooksWrong =
+      Number.isFinite(numericDistance) &&
+      numericDistance <= 0.5 &&
+      viewerForDistance &&
+      locationsHaveDifferentKnownParts(viewerForDistance, team);
+
+    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
+      if (rawZeroLooksWrong) {
+        return computedDistance;
+      }
+
+      return numericDistance;
+    }
 
     if (computedDistance != null) {
       return computedDistance;
-    }
-
-    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
-      return numericDistance;
     }
 
     return null;

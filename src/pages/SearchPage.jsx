@@ -57,7 +57,10 @@ import {
   RESULTS_PER_PAGE_OPTIONS,
   DEFAULT_RESULTS_PER_PAGE,
 } from "../constants/pagination";
-import { calculateDistanceKm } from "../utils/locationUtils";
+import {
+  calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
+} from "../utils/locationUtils";
 
 const SearchPage = () => {
   const location = useLocation();
@@ -206,13 +209,21 @@ const SearchPage = () => {
 
     const matchType = item.matchType ?? item.match_type ?? null;
     const matchDetails = item.matchDetails ?? item.match_details ?? null;
-    const roleDistance = Number(
-      matchDetails?.distanceKm ?? matchDetails?.distance_km,
-    );
-    const rawDistance = Number(item.distance_km ?? item.distanceKm);
+    const rawRoleDistance =
+      matchDetails?.distanceKm ?? matchDetails?.distance_km;
+    const roleDistance =
+      rawRoleDistance != null ? Number(rawRoleDistance) : null;
+    const rawDistanceValue = item.distanceKm ?? item.distance_km;
+    const rawDistance =
+      rawDistanceValue != null ? Number(rawDistanceValue) : null;
     const computedDistance = viewerEntity
       ? calculateDistanceKm(viewerEntity, item)
       : null;
+    const rawZeroLooksWrong =
+      Number.isFinite(rawDistance) &&
+      rawDistance <= 0.5 &&
+      viewerEntity &&
+      locationsHaveDifferentKnownParts(viewerEntity, item);
 
     let resolvedDistance = null;
 
@@ -222,10 +233,23 @@ const SearchPage = () => {
       roleDistance < 999999
     ) {
       resolvedDistance = roleDistance;
+    } else if (Number.isFinite(rawDistance) && rawDistance < 999999) {
+      resolvedDistance =
+        rawZeroLooksWrong && computedDistance != null
+          ? computedDistance
+          : rawZeroLooksWrong
+            ? null
+            : rawDistance;
     } else if (computedDistance != null) {
       resolvedDistance = computedDistance;
-    } else if (Number.isFinite(rawDistance) && rawDistance < 999999) {
-      resolvedDistance = rawDistance;
+    }
+
+    if (resolvedDistance == null && rawZeroLooksWrong) {
+      return {
+        ...item,
+        distance_km: null,
+        distanceKm: null,
+      };
     }
 
     if (resolvedDistance == null) {
@@ -349,40 +373,42 @@ const SearchPage = () => {
       ...searchResults,
       users: Array.isArray(searchResults.users)
         ? searchResults.users.map((matchedUser) => {
+            const distanceResolvedUser = withResolvedDistance(
+              matchedUser,
+              viewerDistanceSource,
+            );
             const enrichedUser =
               sortBy === "match"
                 ? matchRoleId
                   ? enrichUserRoleMatchData({
-                      user: matchedUser,
+                      user: distanceResolvedUser,
                       requiredTagIds: roleMatchTagIds,
                       requiredBadgeNames: roleMatchBadgeNames,
                     })
                   : enrichUserMatchData({
-                      user: matchedUser,
+                      user: distanceResolvedUser,
                       viewerProfile: viewerTeamMatchProfile,
                     })
-                : matchedUser;
+                : distanceResolvedUser;
 
-            return withResolvedDistance(
-              enrichedUser,
-              viewerDistanceSource,
-            );
+            return enrichedUser;
           })
         : searchResults.users,
       teams: Array.isArray(searchResults.teams)
         ? searchResults.teams.map((team) => {
+            const distanceResolvedTeam = withResolvedDistance(
+              team,
+              viewerDistanceSource,
+            );
             const enrichedTeam =
               sortBy === "match"
                 ? enrichTeamMatchData({
-                    team,
+                    team: distanceResolvedTeam,
                     viewerProfile: viewerTeamMatchProfile,
                   })
-                : team;
+                : distanceResolvedTeam;
 
-            return withResolvedDistance(
-              enrichedTeam,
-              viewerDistanceSource,
-            );
+            return enrichedTeam;
           })
         : searchResults.teams,
       roles: Array.isArray(searchResults.roles)

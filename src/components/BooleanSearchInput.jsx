@@ -470,7 +470,7 @@ const BooleanSearchInput = ({
             {showDropdown && hasSuggestions && (
               <div
                 ref={dropdownRef}
-                className="absolute left-0 top-full z-50 mt-1 w-full overflow-y-auto rounded-lg border border-base-300 bg-white shadow-lg"
+                className="absolute left-0 top-full z-[10000] mt-1 w-full overflow-y-auto rounded-lg border border-base-300 bg-white shadow-lg"
                 style={{ maxHeight: "16rem" }}
               >
                 {suggestions.tags.length > 0 && (

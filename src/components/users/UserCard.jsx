@@ -121,11 +121,12 @@ const UserCard = ({
       roleMatchBadgeNames,
       roleMatchName,
       roleMatchMaxDistanceKm,
+      isFromSearch: true,
       showMatchHighlights,
       matchScore: rawScore,
       matchType: user.matchType ?? user.match_type ?? null,
       matchDetails: user.matchDetails ?? user.match_details ?? null,
-      distanceKm: user.distance_km ?? user.distanceKm ?? null,
+      distanceKm: user.distanceKm ?? user.distance_km ?? null,
       invitationPrefillTeamId,
       invitationPrefillRoleId,
       invitationPrefillTeamName,
@@ -230,7 +231,7 @@ const UserCard = ({
       user.is_remote || user.isRemote
         ? "Remote"
         : [user.city, user.country].filter(Boolean).join(", ");
-    const distance = user.distance_km ?? user.distanceKm;
+    const distance = user.distanceKm ?? user.distance_km;
     const showDistance = distance != null && distance < 999999 && !(user.is_remote || user.isRemote);
 
     const tagNames = (user.tags || [])
@@ -444,7 +445,7 @@ const UserCard = ({
       <LocationDistanceTagsRow
         entity={user}
         entityType="user"
-        distance={user.distance_km ?? user.distanceKm}
+        distance={user.distanceKm ?? user.distance_km}
         tags={viewMode === "mini" && !activeFilters.showTags ? null : user.tags}
         badges={
           viewMode === "mini" && !activeFilters.showBadges ? null : user.badges
