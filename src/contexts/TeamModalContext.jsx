@@ -33,7 +33,18 @@ export const TeamModalProvider = ({ children }) => {
       ? Math.max(BASE_Z_INDEX, requestedZIndex)
       : BASE_Z_INDEX;
 
-    setSelectedTeam({ id: teamId, name: teamName, zIndex: modalZIndex });
+    setSelectedTeam({
+      id: teamId,
+      name: teamName,
+      zIndex: modalZIndex,
+      initialTeamData: options?.initialTeamData ?? null,
+      isFromSearch: Boolean(options?.isFromSearch),
+      showMatchHighlights: Boolean(options?.showMatchHighlights),
+      roleMatchBadgeNames: options?.roleMatchBadgeNames ?? null,
+      matchScore: options?.matchScore ?? null,
+      matchType: options?.matchType ?? null,
+      matchDetails: options?.matchDetails ?? null,
+    });
     setIsOpen(true);
   }, []);
 
@@ -66,10 +77,17 @@ export const TeamModalProvider = ({ children }) => {
               isOpen={true}
               teamId={selectedTeam.id}
               initialTeamData={{
-                id: selectedTeam.id,
-                name: selectedTeam.name,
+                ...(selectedTeam.initialTeamData ?? {}),
+                id: selectedTeam.initialTeamData?.id ?? selectedTeam.id,
+                name: selectedTeam.initialTeamData?.name ?? selectedTeam.name,
               }}
               onClose={closeTeamModal}
+              isFromSearch={selectedTeam.isFromSearch}
+              showMatchHighlights={selectedTeam.showMatchHighlights}
+              roleMatchBadgeNames={selectedTeam.roleMatchBadgeNames}
+              matchScore={selectedTeam.matchScore}
+              matchType={selectedTeam.matchType}
+              matchDetails={selectedTeam.matchDetails}
               zIndexStyle={{ zIndex: modalZIndex }}
               boxZIndexStyle={{ zIndex: modalZIndex + 1 }}
             />

@@ -152,6 +152,8 @@ const DEMO_PROFILE_LOCATION_FALLBACKS = {
 };
 
 const toNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 };
@@ -656,8 +658,19 @@ const getDistanceLabel = (item) => {
   );
 
   if (distance === null || distance >= 999999) return null;
+  if (distance === 0) return "0 km away";
   if (distance < 1) return `${distance.toFixed(1)} km away`;
   return `${Math.round(distance)} km away`;
+};
+
+const getDistanceValue = (item) => {
+  const matchDetails = item?.matchDetails ?? item?.match_details ?? null;
+  return toNumber(
+    item?.distanceKm ??
+      item?.distance_km ??
+      matchDetails?.distanceKm ??
+      matchDetails?.distance_km,
+  );
 };
 
 const INACTIVE_APPLICATION_STATUSES = new Set(["withdrawn", "rejected", "declined", "cancelled", "canceled"]);
@@ -1101,6 +1114,7 @@ const normalizeMapPoint = (
     locationLabel,
     countryCode,
     maxDistanceKm: getItemMaxDistanceKm(item),
+    distanceKm: shouldUseCityCoordinateFallback ? null : getDistanceValue(item),
     distanceLabel: shouldUseCityCoordinateFallback ? null : getDistanceLabel(item),
     teamName: item.teamName ?? item.team_name ?? item.team?.name ?? null,
     memberCount: type === "team" ? getTeamMemberCount(item) : null,
@@ -2646,7 +2660,14 @@ const SearchMapView = ({
 
   const openPoint = (point) => {
     if (point.type === "team") {
-      teamModal?.openTeamModal(point.rawId, point.name);
+      teamModal?.openTeamModal(point.rawId, point.name, {
+        initialTeamData: point.item,
+        isFromSearch: true,
+        showMatchHighlights,
+        matchScore: showMatchScore ? getResultMatchScore(point.item) : null,
+        matchType: point.item.matchType ?? point.item.match_type ?? null,
+        matchDetails: point.item.matchDetails ?? point.item.match_details ?? null,
+      });
       return;
     }
 
@@ -2656,11 +2677,12 @@ const SearchMapView = ({
         roleMatchBadgeNames,
         roleMatchName,
         roleMatchMaxDistanceKm,
+        isFromSearch: true,
         showMatchHighlights,
         matchScore: showMatchScore ? getResultMatchScore(point.item) : null,
         matchType: point.item.matchType ?? point.item.match_type ?? null,
         matchDetails: point.item.matchDetails ?? point.item.match_details ?? null,
-        distanceKm: point.item.distance_km ?? point.item.distanceKm ?? null,
+        distanceKm: point.distanceKm,
         invitationPrefillTeamId,
         invitationPrefillRoleId,
         invitationPrefillTeamName,

@@ -1814,10 +1814,7 @@ const TeamCard = ({
           : getResultMatchScore(normalizedData.team)
       )
     : null;
-  const showScore =
-    showMatchScore &&
-    rawScore != null &&
-    (isRoleVariant || rawScore > 0);
+  const showScore = showMatchScore && rawScore != null;
 
   let matchTier = null;
   let matchOverlay = null;
