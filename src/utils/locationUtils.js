@@ -213,15 +213,38 @@ export const normalizeLocationData = (entity) => {
     entity.postalCode,
     entity.location?.postal_code,
     entity.location?.postalCode,
+    entity.role_location?.postal_code,
+    entity.role_location?.postalCode,
+    entity.roleLocation?.postal_code,
+    entity.roleLocation?.postalCode,
   ) ?? null;
-  const city = firstPresent(entity.city, entity.location?.city) ?? null;
-  const state = firstPresent(entity.state, entity.location?.state) ?? null;
-  const country = firstPresent(entity.country, entity.location?.country) ?? null;
+  const city = firstPresent(
+    entity.city,
+    entity.location?.city,
+    entity.role_location?.city,
+    entity.roleLocation?.city,
+  ) ?? null;
+  const state = firstPresent(
+    entity.state,
+    entity.location?.state,
+    entity.role_location?.state,
+    entity.roleLocation?.state,
+  ) ?? null;
+  const country = firstPresent(
+    entity.country,
+    entity.location?.country,
+    entity.role_location?.country,
+    entity.roleLocation?.country,
+  ) ?? null;
   const latitude = firstPresent(
     entity.latitude,
     entity.lat,
     entity.location?.latitude,
     entity.location?.lat,
+    entity.role_location?.latitude,
+    entity.role_location?.lat,
+    entity.roleLocation?.latitude,
+    entity.roleLocation?.lat,
   ) ?? null;
   const longitude = firstPresent(
     entity.longitude,
@@ -230,6 +253,12 @@ export const normalizeLocationData = (entity) => {
     entity.location?.longitude,
     entity.location?.lng,
     entity.location?.lon,
+    entity.role_location?.longitude,
+    entity.role_location?.lng,
+    entity.role_location?.lon,
+    entity.roleLocation?.longitude,
+    entity.roleLocation?.lng,
+    entity.roleLocation?.lon,
   ) ?? null;
   const isRemote = entity.is_remote === true || entity.isRemote === true;
 

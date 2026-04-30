@@ -29,11 +29,13 @@ export const getSortOptionDisplay = ({
         ? sortDir
         : option.defaultDir || "desc"
     : option.defaultDir || "desc";
+  const displayDir =
+    option.value === "proximity" && currentDir === "desc" ? "asc" : currentDir;
 
-  if (currentDir === "asc") {
+  if (displayDir === "asc") {
     return {
       isActive,
-      currentDir,
+      currentDir: displayDir,
       IconComponent: option.iconAsc,
       label: option.labelAsc,
       shortLabel: option.shortLabelAsc,
@@ -41,10 +43,10 @@ export const getSortOptionDisplay = ({
     };
   }
 
-  if (currentDir === "remote") {
+  if (displayDir === "remote") {
     return {
       isActive,
-      currentDir,
+      currentDir: displayDir,
       IconComponent: option.iconRemote,
       label: option.labelRemote,
       shortLabel: option.shortLabelRemote,
@@ -106,14 +108,8 @@ export const getActiveCriteriaPills = ({
   } else if (sortBy === "proximity") {
     pills.push({
       key: "sort",
-      label:
-        sortDir === "remote"
-          ? "Remote"
-          : sortDir === "desc"
-            ? "Farthest"
-            : "Nearest",
-      shortLabel:
-        sortDir === "remote" ? "Remote" : sortDir === "desc" ? "Far" : "Near",
+      label: sortDir === "remote" ? "Remote" : "Nearest",
+      shortLabel: sortDir === "remote" ? "Remote" : "Near",
     });
   }
 

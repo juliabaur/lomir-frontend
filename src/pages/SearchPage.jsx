@@ -62,6 +62,26 @@ import {
   locationsHaveDifferentKnownParts,
 } from "../utils/locationUtils";
 
+const DISTANCE_UNAVAILABLE_SENTINEL_KM = 999999;
+
+const getFilterableDistanceKm = (item) => {
+  const matchDetails = item?.matchDetails ?? item?.match_details ?? null;
+  const rawDistance =
+    item?.distanceKm ??
+    item?.distance_km ??
+    matchDetails?.distanceKm ??
+    matchDetails?.distance_km;
+  const distance =
+    rawDistance !== null && rawDistance !== undefined && rawDistance !== ""
+      ? Number(rawDistance)
+      : null;
+
+  return Number.isFinite(distance) &&
+    distance < DISTANCE_UNAVAILABLE_SENTINEL_KM
+    ? distance
+    : null;
+};
+
 const SearchPage = () => {
   const location = useLocation();
   const { user, isAuthenticated } = useAuth();
@@ -212,10 +232,18 @@ const SearchPage = () => {
     const rawRoleDistance =
       matchDetails?.distanceKm ?? matchDetails?.distance_km;
     const roleDistance =
-      rawRoleDistance != null ? Number(rawRoleDistance) : null;
+      rawRoleDistance !== null &&
+      rawRoleDistance !== undefined &&
+      rawRoleDistance !== ""
+        ? Number(rawRoleDistance)
+        : null;
     const rawDistanceValue = item.distanceKm ?? item.distance_km;
     const rawDistance =
-      rawDistanceValue != null ? Number(rawDistanceValue) : null;
+      rawDistanceValue !== null &&
+      rawDistanceValue !== undefined &&
+      rawDistanceValue !== ""
+        ? Number(rawDistanceValue)
+        : null;
     const computedDistance = viewerEntity
       ? calculateDistanceKm(viewerEntity, item)
       : null;
@@ -230,10 +258,13 @@ const SearchPage = () => {
     if (
       matchType === "role_match" &&
       Number.isFinite(roleDistance) &&
-      roleDistance < 999999
+      roleDistance < DISTANCE_UNAVAILABLE_SENTINEL_KM
     ) {
       resolvedDistance = roleDistance;
-    } else if (Number.isFinite(rawDistance) && rawDistance < 999999) {
+    } else if (
+      Number.isFinite(rawDistance) &&
+      rawDistance < DISTANCE_UNAVAILABLE_SENTINEL_KM
+    ) {
       resolvedDistance =
         rawZeroLooksWrong && computedDistance != null
           ? computedDistance
@@ -316,16 +347,12 @@ const SearchPage = () => {
       value: "proximity",
       defaultDir: "asc",
       labelAsc: "Nearest",
-      labelDesc: "Farthest",
       labelRemote: "Remote",
       shortLabelAsc: "Near",
-      shortLabelDesc: "Far",
       shortLabelRemote: "Remote",
       tooltipAsc: "Show the nearest results first",
-      tooltipDesc: "Show the farthest results first",
       tooltipRemote: "Show remote-friendly results first",
       iconAsc: MapPin,
-      iconDesc: MapPin,
       iconRemote: Globe,
     },
     {
@@ -365,20 +392,19 @@ const SearchPage = () => {
   );
 
   const effectiveSearchResults = useMemo(() => {
-    if (!viewerTeamMatchProfile?.user) {
-      return searchResults;
-    }
+    const shouldResolveDistance = Boolean(viewerDistanceSource);
+    const shouldEnrichMatches =
+      sortBy === "match" && Boolean(viewerTeamMatchProfile?.user);
 
     return {
       ...searchResults,
       users: Array.isArray(searchResults.users)
         ? searchResults.users.map((matchedUser) => {
-            const distanceResolvedUser = withResolvedDistance(
-              matchedUser,
-              viewerDistanceSource,
-            );
+            const distanceResolvedUser = shouldResolveDistance
+              ? withResolvedDistance(matchedUser, viewerDistanceSource)
+              : matchedUser;
             const enrichedUser =
-              sortBy === "match"
+              shouldEnrichMatches
                 ? matchRoleId
                   ? enrichUserRoleMatchData({
                       user: distanceResolvedUser,
@@ -396,12 +422,11 @@ const SearchPage = () => {
         : searchResults.users,
       teams: Array.isArray(searchResults.teams)
         ? searchResults.teams.map((team) => {
-            const distanceResolvedTeam = withResolvedDistance(
-              team,
-              viewerDistanceSource,
-            );
+            const distanceResolvedTeam = shouldResolveDistance
+              ? withResolvedDistance(team, viewerDistanceSource)
+              : team;
             const enrichedTeam =
-              sortBy === "match"
+              shouldEnrichMatches
                 ? enrichTeamMatchData({
                     team: distanceResolvedTeam,
                     viewerProfile: viewerTeamMatchProfile,
@@ -413,7 +438,9 @@ const SearchPage = () => {
         : searchResults.teams,
       roles: Array.isArray(searchResults.roles)
         ? searchResults.roles.map((role) =>
-            withResolvedDistance(role, viewerDistanceSource),
+            shouldResolveDistance
+              ? withResolvedDistance(role, viewerDistanceSource)
+              : role,
           )
         : searchResults.roles,
     };
@@ -431,22 +458,44 @@ const SearchPage = () => {
   const shouldExcludeCurrentUserFromBestMatch =
     sortBy === "match" && isAuthenticated && !!user?.id;
 
-  const displaySearchResults = useMemo(() => {
-    if (
-      !shouldExcludeCurrentUserFromBestMatch ||
-      !Array.isArray(effectiveSearchResults.users)
-    ) {
+  const distanceFilteredSearchResults = useMemo(() => {
+    const distanceLimit = Number(maxDistance);
+
+    if (!Number.isFinite(distanceLimit) || distanceLimit <= 0) {
       return effectiveSearchResults;
     }
 
+    const isWithinDistanceLimit = (item) => {
+      const distance = getFilterableDistanceKm(item);
+      return distance !== null && distance <= distanceLimit;
+    };
+    const filterItems = (items) =>
+      Array.isArray(items) ? items.filter(isWithinDistanceLimit) : items;
+
     return {
       ...effectiveSearchResults,
-      users: effectiveSearchResults.users.filter(
+      users: filterItems(effectiveSearchResults.users),
+      teams: filterItems(effectiveSearchResults.teams),
+      roles: filterItems(effectiveSearchResults.roles),
+    };
+  }, [effectiveSearchResults, maxDistance]);
+
+  const displaySearchResults = useMemo(() => {
+    if (
+      !shouldExcludeCurrentUserFromBestMatch ||
+      !Array.isArray(distanceFilteredSearchResults.users)
+    ) {
+      return distanceFilteredSearchResults;
+    }
+
+    return {
+      ...distanceFilteredSearchResults,
+      users: distanceFilteredSearchResults.users.filter(
         (matchedUser) => String(matchedUser?.id) !== String(user.id),
       ),
     };
   }, [
-    effectiveSearchResults,
+    distanceFilteredSearchResults,
     shouldExcludeCurrentUserFromBestMatch,
     user?.id,
   ]);
@@ -574,7 +623,7 @@ const SearchPage = () => {
       if (sortBy === "proximity") {
         const aDist = a.distance_km ?? a.distanceKm ?? Infinity;
         const bDist = b.distance_km ?? b.distanceKm ?? Infinity;
-        return sortDir === "asc" ? aDist - bDist : bDist - aDist;
+        return aDist - bDist;
       }
       if (sortBy === "match") {
         const aScore = getResultMatchScore(a);
@@ -634,7 +683,10 @@ const SearchPage = () => {
           ];
 
   const hasActiveFilters =
-    filterTagIds.length > 0 || filterBadgeIds.length > 0 || !!matchRoleId;
+    filterTagIds.length > 0 ||
+    filterBadgeIds.length > 0 ||
+    maxDistance !== null ||
+    !!matchRoleId;
 
   const noResultsFound =
     (hasSearched || hasActiveFilters) &&
@@ -898,6 +950,13 @@ const SearchPage = () => {
     }
   }, [showSortDropdown, openSubmenuKey, searchType, userHasCoordinates]);
 
+  useEffect(() => {
+    if (sortBy === "proximity" && sortDir === "desc") {
+      setSortDir("asc");
+      setCurrentPage(1);
+    }
+  }, [sortBy, sortDir]);
+
   useLayoutEffect(() => {
     if (!activeSubmenuKey || !showSortDropdown) {
       setSubmenuPosition(null);
@@ -1061,13 +1120,7 @@ const SearchPage = () => {
 
     if (newSortBy === sortBy) {
       if (newSortBy === "proximity") {
-        if (sortDir === "asc") {
-          newSortDir = "desc";
-        } else if (sortDir === "desc") {
-          newSortDir = "remote";
-        } else {
-          newSortDir = "asc";
-        }
+        newSortDir = sortDir === "remote" ? "asc" : "remote";
       } else if (newSortBy === "capacity") {
         newSortDir = sortDir === "desc" ? "asc" : "desc";
       } else if (newSortBy === "match") {
