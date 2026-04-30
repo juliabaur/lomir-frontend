@@ -36,6 +36,7 @@ import { useTeamModalSafe } from "../../contexts/TeamModalContext";
 import { useUserModalSafe } from "../../contexts/UserModalContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { teamService } from "../../services/teamService";
+import { userService } from "../../services/userService";
 import { getResultMatchScore } from "../../utils/teamMatchUtils";
 import {
   getTeamInitials,
@@ -87,18 +88,66 @@ const MAP_POPUP_ARROW_EDGE_PADDING = 14;
 const MAP_MARKER_HALF_HEIGHT = 17;
 const MAP_POPUP_ARROW_MASK = `url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0.500009 1C3.5 1 3.00001 7 6.00001 7C9 7 8.5 1 11.5 1C12 1 12 0.5 12 0H0C0 0.5 0 1 0.500009 1Z' fill='white'/%3E%3C/svg%3E")`;
 const COUNTRY_COORDINATE_BOUNDS = {
+  CA: { minLat: 41.6, maxLat: 83.2, minLng: -141.1, maxLng: -52.6 },
+  CO: { minLat: -4.3, maxLat: 13.6, minLng: -82.2, maxLng: -66.8 },
   DE: { minLat: 47.2, maxLat: 55.2, minLng: 5.7, maxLng: 15.1 },
+  ES: { minLat: 27.5, maxLat: 43.9, minLng: -18.3, maxLng: 4.4 },
   FR: { minLat: 41.2, maxLat: 51.2, minLng: -5.6, maxLng: 9.7 },
+  ZA: { minLat: -35.0, maxLat: -22.0, minLng: 16.0, maxLng: 33.2 },
 };
 const CITY_COUNTRY_FALLBACKS = {
   berlin: "DE",
+  bogota: "CO",
+  "bogota dc": "CO",
+  "bogota d.c.": "CO",
+  bogotá: "CO",
+  "bogotá dc": "CO",
+  "bogotá d.c.": "CO",
   frankfurt: "DE",
   "frankfurt am main": "DE",
+  johannesburg: "ZA",
+  madrid: "ES",
+  toronto: "CA",
 };
 const CITY_COORDINATE_FALLBACKS = {
   berlin: { lat: 52.52, lng: 13.405 },
+  bogota: { lat: 4.711, lng: -74.0721 },
+  "bogota dc": { lat: 4.711, lng: -74.0721 },
+  "bogota d.c.": { lat: 4.711, lng: -74.0721 },
+  bogotá: { lat: 4.711, lng: -74.0721 },
+  "bogotá dc": { lat: 4.711, lng: -74.0721 },
+  "bogotá d.c.": { lat: 4.711, lng: -74.0721 },
   frankfurt: { lat: 50.1109, lng: 8.6821 },
   "frankfurt am main": { lat: 50.1109, lng: 8.6821 },
+  johannesburg: { lat: -26.2041, lng: 28.0473 },
+  madrid: { lat: 40.4168, lng: -3.7038 },
+  toronto: { lat: 43.6532, lng: -79.3832 },
+};
+const DEMO_PROFILE_LOCATION_FALLBACKS = {
+  af_lerato_mokoena: {
+    city: "Johannesburg",
+    countryCode: "ZA",
+    lat: -26.2041,
+    lng: 28.0473,
+  },
+  ca_noah_singh: {
+    city: "Toronto",
+    countryCode: "CA",
+    lat: 43.6532,
+    lng: -79.3832,
+  },
+  es_marta_garcia: {
+    city: "Madrid",
+    countryCode: "ES",
+    lat: 40.4168,
+    lng: -3.7038,
+  },
+  sa_valentina_lopez: {
+    city: "Bogota",
+    countryCode: "CO",
+    lat: 4.711,
+    lng: -74.0721,
+  },
 };
 
 const toNumber = (value) => {
@@ -192,6 +241,168 @@ const getMapPointType = (item) =>
 
 const getTeamItemId = (item) => firstPresent(item?.id, item?.teamId, item?.team_id);
 
+const getUserItemId = (item) => firstPresent(item?.id, item?.userId, item?.user_id);
+
+const getItemUsername = (item) =>
+  firstPresent(item?.username, item?.user?.username, item?.profile?.username);
+
+const getItemPostalCode = (item) =>
+  firstPresent(
+    item.postal_code,
+    item.postalCode,
+    item.location_postal_code,
+    item.locationPostalCode,
+    item.zipCode,
+    item.zip_code,
+    item.rolePostalCode,
+    item.role_postal_code,
+    item.roleLocation?.postalCode,
+    item.roleLocation?.postal_code,
+    item.role_location?.postalCode,
+    item.role_location?.postal_code,
+    item.location?.postalCode,
+    item.location?.postal_code,
+    item.profileLocation?.postalCode,
+    item.profileLocation?.postal_code,
+    item.profile_location?.postalCode,
+    item.profile_location?.postal_code,
+    item.profile?.postalCode,
+    item.profile?.postal_code,
+    item.user?.postalCode,
+    item.user?.postal_code,
+    item.role?.postalCode,
+    item.role?.postal_code,
+  );
+
+const getItemLocationText = (item) => {
+  const locationValue = typeof item.location === "string" ? item.location : null;
+  const userLocationValue = typeof item.user?.location === "string" ? item.user.location : null;
+  const profileLocationValue =
+    typeof item.profile?.location === "string" ? item.profile.location : null;
+
+  return firstPresent(
+    item.locationLabel,
+    item.location_label,
+    item.locationDisplayName,
+    item.location_display_name,
+    item.displayLocation,
+    item.display_location,
+    item.formattedLocation,
+    item.formatted_location,
+    item.address,
+    item.location?.label,
+    item.location?.displayName,
+    item.location?.display_name,
+    item.location?.formattedLocation,
+    item.location?.formatted_location,
+    item.location?.formatted,
+    item.location?.address,
+    item.profileLocation?.label,
+    item.profileLocation?.displayName,
+    item.profileLocation?.display_name,
+    item.profileLocation?.formattedLocation,
+    item.profileLocation?.formatted_location,
+    item.profileLocation?.formatted,
+    item.profileLocation?.address,
+    item.profile_location?.label,
+    item.profile_location?.displayName,
+    item.profile_location?.display_name,
+    item.profile_location?.formattedLocation,
+    item.profile_location?.formatted_location,
+    item.profile_location?.formatted,
+    item.profile_location?.address,
+    item.profile?.locationLabel,
+    item.profile?.location_label,
+    item.profile?.locationDisplayName,
+    item.profile?.location_display_name,
+    item.profile?.displayLocation,
+    item.profile?.display_location,
+    item.profile?.formattedLocation,
+    item.profile?.formatted_location,
+    item.profile?.address,
+    item.user?.locationLabel,
+    item.user?.location_label,
+    item.user?.locationDisplayName,
+    item.user?.location_display_name,
+    item.user?.displayLocation,
+    item.user?.display_location,
+    item.user?.formattedLocation,
+    item.user?.formatted_location,
+    item.user?.address,
+    locationValue,
+    userLocationValue,
+    profileLocationValue,
+  );
+};
+
+const getItemNarrativeText = (item) =>
+  firstPresent(
+    item.bio,
+    item.biography,
+    item.description,
+    item.summary,
+    item.profile?.bio,
+    item.profile?.biography,
+    item.profile?.description,
+    item.user?.bio,
+    item.user?.biography,
+    item.user?.description,
+  );
+
+const isDemoItem = (item) =>
+  isSyntheticTeam(item) || isSyntheticUser(item) || isSyntheticRole(item);
+
+const getCanonicalDemoLocation = (item) => {
+  if (!isDemoItem(item)) return null;
+
+  const username = String(getItemUsername(item) ?? "").trim().toLowerCase();
+  return DEMO_PROFILE_LOCATION_FALLBACKS[username] ?? null;
+};
+
+const textContainsBogota = (value) =>
+  /\bbogot[aá]\b/i.test(String(value ?? ""));
+
+const textContainsJohannesburg = (value) =>
+  /\bjohannesburg\b/i.test(String(value ?? ""));
+
+const textContainsMadrid = (value) =>
+  /\bmadrid\b/i.test(String(value ?? ""));
+
+const textContainsToronto = (value) =>
+  /\btoronto\b/i.test(String(value ?? ""));
+
+const textContainsColombia = (value) =>
+  /\b(colombia|colombie|kolumbien)\b/i.test(String(value ?? ""));
+
+const textContainsSpain = (value) =>
+  /\b(spain|españa|spanien|espagne)\b/i.test(String(value ?? ""));
+
+const textContainsSouthAfrica = (value) =>
+  /\b(south africa|südafrika|sudáfrica|afrique du sud)\b/i.test(String(value ?? ""));
+
+const textContainsCanada = (value) =>
+  /\b(canada|kanada)\b/i.test(String(value ?? ""));
+
+const inferCityFromLocationText = (value) => {
+  if (textContainsBogota(value)) return "Bogota";
+  if (textContainsJohannesburg(value)) return "Johannesburg";
+  if (textContainsMadrid(value)) return "Madrid";
+  if (textContainsToronto(value)) return "Toronto";
+  return null;
+};
+
+const inferDemoCityFromNarrativeText = (item) =>
+  isDemoItem(item) ? inferCityFromLocationText(getItemNarrativeText(item)) : null;
+
+const inferCityFromPostalCode = (value) => {
+  const postalCode = String(value ?? "").trim().toUpperCase();
+  if (/^11\d{4}$/.test(postalCode)) return "Bogota";
+  if (postalCode === "2000") return "Johannesburg";
+  if (/^28\d{3}$/.test(postalCode)) return "Madrid";
+  if (/^M\d[A-Z]\s?\d[A-Z]\d$/.test(postalCode)) return "Toronto";
+  return null;
+};
+
 const getItemCity = (item) =>
   firstPresent(
     item.city,
@@ -202,22 +413,40 @@ const getItemCity = (item) =>
     item.roleLocation?.city,
     item.role_location?.city,
     item.location?.city,
+    item.profileLocation?.city,
+    item.profile_location?.city,
+    item.profile?.city,
+    item.user?.city,
     item.role?.city,
+    getCanonicalDemoLocation(item)?.city,
+    inferCityFromLocationText(getItemLocationText(item)),
+    inferCityFromPostalCode(getItemPostalCode(item)),
+    inferDemoCityFromNarrativeText(item),
   );
 
 const getLocationLabel = (item) => {
   if (item.is_remote ?? item.isRemote) return "Remote";
 
   const city = getItemCity(item);
+  const inferredCountryCode =
+    getCanonicalDemoLocation(item)?.countryCode ??
+    CITY_COUNTRY_FALLBACKS[normalizeLocationKey(city)] ??
+    null;
   const country = firstPresent(
     item.country,
     item.location_country,
     item.locationCountry,
+    item.countryCode,
+    item.country_code,
     item.roleCountry,
     item.role_country,
     item.roleLocation?.country,
     item.role_location?.country,
     item.location?.country,
+    item.profileLocation?.country,
+    item.profile_location?.country,
+    item.profile?.country,
+    item.user?.country,
     item.role?.country,
   );
   const state = firstPresent(
@@ -229,31 +458,103 @@ const getLocationLabel = (item) => {
     item.roleLocation?.state,
     item.role_location?.state,
     item.location?.state,
+    item.profileLocation?.state,
+    item.profile_location?.state,
+    item.profile?.state,
+    item.user?.state,
     item.role?.state,
   );
   const countryLabel = country
     ? getCountryDisplayName(getCountryCode(country) ?? country)
-    : null;
+    : inferredCountryCode
+      ? getCountryDisplayName(inferredCountryCode)
+      : null;
   const parts = [city, state, countryLabel].filter(Boolean);
 
   return parts.length > 0 ? parts.join(", ") : LOCATION_NOT_AVAILABLE;
 };
 
-const getItemCountryCode = (item) =>
-  getCountryCode(firstPresent(
+const getItemCountryCode = (item) => {
+  const explicitCountryCode = getCountryCode(firstPresent(
     item?.country,
     item?.location_country,
     item?.locationCountry,
+    item?.countryCode,
+    item?.country_code,
     item?.roleCountry,
     item?.role_country,
     item?.roleLocation?.country,
     item?.role_location?.country,
     item?.location?.country,
+    item?.profileLocation?.country,
+    item?.profile_location?.country,
+    item?.profile?.country,
+    item?.user?.country,
     item?.role?.country,
-  )) ?? CITY_COUNTRY_FALLBACKS[normalizeLocationKey(getItemCity(item))] ?? null;
+  ));
+  if (explicitCountryCode) return explicitCountryCode;
+
+  const locationText = getItemLocationText(item);
+  if (textContainsColombia(locationText)) return "CO";
+  if (textContainsSpain(locationText)) return "ES";
+  if (textContainsSouthAfrica(locationText)) return "ZA";
+  if (textContainsCanada(locationText)) return "CA";
+
+  const canonicalDemoLocation = getCanonicalDemoLocation(item);
+  if (canonicalDemoLocation?.countryCode) return canonicalDemoLocation.countryCode;
+
+  const cityKey = normalizeLocationKey(getItemCity(item));
+  const cityCountryCode = CITY_COUNTRY_FALLBACKS[cityKey] ?? null;
+  if (cityCountryCode) return cityCountryCode;
+
+  const postalCode = String(getItemPostalCode(item) ?? "").trim();
+  if (/^11\d{4}$/.test(postalCode) && textContainsBogota(`${getItemCity(item) ?? ""} ${locationText ?? ""}`)) {
+    return "CO";
+  }
+  if (/^28\d{3}$/.test(postalCode) && textContainsMadrid(`${getItemCity(item) ?? ""} ${locationText ?? ""}`)) {
+    return "ES";
+  }
+  if (/^M\d[A-Z]\s?\d[A-Z]\d$/i.test(postalCode) && textContainsToronto(`${getItemCity(item) ?? ""} ${locationText ?? ""}`)) {
+    return "CA";
+  }
+
+  return null;
+};
 
 const getCityCoordinateFallback = (item) =>
-  CITY_COORDINATE_FALLBACKS[normalizeLocationKey(getItemCity(item))] ?? null;
+  getCanonicalDemoLocation(item) ??
+  CITY_COORDINATE_FALLBACKS[normalizeLocationKey(getItemCity(item))] ??
+  null;
+
+const unwrapUserDetailsResponse = (response) => {
+  const payload = response?.data ?? response;
+  return firstObject(
+    payload?.data?.user,
+    payload?.data?.profile,
+    payload?.data?.data,
+    payload?.data,
+    payload?.user,
+    payload?.profile,
+    payload,
+  ) ?? null;
+};
+
+const mergeUserLocationDetails = (item, userDetails) => {
+  if (!item || !userDetails) return item;
+
+  const detailsCoordinates = getLatLng(userDetails);
+
+  return {
+    ...item,
+    postalCode: firstPresent(item.postalCode, item.postal_code, getItemPostalCode(userDetails)),
+    postal_code: firstPresent(item.postal_code, item.postalCode, getItemPostalCode(userDetails)),
+    city: firstPresent(item.city, getItemCity(userDetails)),
+    state: firstPresent(item.state, userDetails.state, userDetails.location?.state),
+    country: firstPresent(item.country, getItemCountryCode(userDetails), userDetails.country),
+    latitude: firstPresent(item.latitude, item.lat, detailsCoordinates?.lat),
+    longitude: firstPresent(item.longitude, item.lng, item.lon, detailsCoordinates?.lng),
+  };
+};
 
 const getItemMaxDistanceKm = (item) =>
   toNumber(firstPresent(item?.maxDistanceKm, item?.max_distance_km, item?.role?.maxDistanceKm, item?.role?.max_distance_km));
@@ -672,7 +973,12 @@ const normalizeMapPoint = (
     rawCoordinatesAreUsable ||
     shouldUseCityCoordinateFallback;
   const avatarData = getAvatarData(item, type);
-  const rawId = type === "team" ? getTeamItemId(item) : item.id ?? item.roleId ?? item.role_id;
+  const rawId =
+    type === "team"
+      ? getTeamItemId(item)
+      : type === "user"
+        ? getUserItemId(item)
+        : item.id ?? item.roleId ?? item.role_id;
   const fetchedTeamRole =
     type === "team" && rawId !== undefined && rawId !== null
       ? fetchedTeamRoles[String(rawId)]
@@ -1344,7 +1650,6 @@ const RoleSubline = ({
 
 const MapPopupCard = ({
   point,
-  searchType = "all",
   onOpenPoint,
   onOpenInvitation,
   onOpenApplication,
@@ -1365,7 +1670,7 @@ const MapPopupCard = ({
       </div>
 
       <div className="flex items-center gap-2">
-        <PopupAvatar point={point} backgroundColor={getMapEntityColor(point, searchType)} />
+        <PopupAvatar point={point} backgroundColor={DEFAULT_MAP_ENTITY_COLOR} />
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[15px] font-medium leading-[1.1] text-[var(--color-primary-focus)]">
             {point.name}
@@ -1454,7 +1759,17 @@ const SearchMapView = ({
   const [popupAnchor, setPopupAnchor] = useState(null);
   const [popupCoords, setPopupCoords] = useState(null);
   const [popupPlacement, setPopupPlacement] = useState("top");
+  const [userLocationDetailsById, setUserLocationDetailsById] = useState({});
   const popupRef = useRef(null);
+  const userLocationFetchesRef = useRef(new Set());
+  const isMountedRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const fetchUserRequestData = useCallback(async () => {
     if (!authUserId) {
@@ -1674,9 +1989,23 @@ const SearchMapView = ({
     window.alert("Reminder feature coming soon!");
   }, []);
 
+  const itemsWithUserLocationDetails = useMemo(
+    () =>
+      items.map((item) => {
+        if (getMapPointType(item) !== "user") return item;
+
+        const userId = getUserItemId(item);
+        const details =
+          userId != null ? userLocationDetailsById[String(userId)] : null;
+
+        return details ? mergeUserLocationDetails(item, details) : item;
+      }),
+    [items, userLocationDetailsById],
+  );
+
   const normalizedPoints = useMemo(
     () =>
-      items
+      itemsWithUserLocationDetails
         .map((item) =>
           normalizeMapPoint(
             item,
@@ -1687,8 +2016,74 @@ const SearchMapView = ({
             fetchedUserTeamIds,
           ))
         .filter(Boolean),
-    [authUserId, fetchedTeamRoles, fetchedApplications, fetchedInvitations, fetchedUserTeamIds, items],
+    [
+      authUserId,
+      fetchedTeamRoles,
+      fetchedApplications,
+      fetchedInvitations,
+      fetchedUserTeamIds,
+      itemsWithUserLocationDetails,
+    ],
   );
+
+  const userIdsNeedingLocationDetails = useMemo(() => {
+    const ids = [];
+    const seenIds = new Set();
+
+    normalizedPoints.forEach((point) => {
+      if (point.type !== "user" || point.hasCoordinates || point.isRemote || point.rawId == null) {
+        return;
+      }
+
+      const userId = String(point.rawId);
+      if (seenIds.has(userId)) return;
+      if (Object.prototype.hasOwnProperty.call(userLocationDetailsById, userId)) return;
+      if (userLocationFetchesRef.current.has(userId)) return;
+
+      seenIds.add(userId);
+      ids.push(userId);
+    });
+
+    return ids;
+  }, [normalizedPoints, userLocationDetailsById]);
+
+  useEffect(() => {
+    if (userIdsNeedingLocationDetails.length === 0) return;
+
+    userIdsNeedingLocationDetails.forEach((userId) => {
+      userLocationFetchesRef.current.add(userId);
+    });
+
+    const fetchUserLocationDetails = async () => {
+      const entries = await Promise.all(
+        userIdsNeedingLocationDetails.map(async (userId) => {
+          try {
+            const response = await userService.getUserById(userId);
+            return [userId, unwrapUserDetailsResponse(response)];
+          } catch {
+            return [userId, null];
+          }
+        }),
+      );
+
+      userIdsNeedingLocationDetails.forEach((userId) => {
+        userLocationFetchesRef.current.delete(userId);
+      });
+
+      if (!isMountedRef.current) return;
+
+      setUserLocationDetailsById((previousDetails) => {
+        const nextDetails = { ...previousDetails };
+        entries.forEach(([userId, details]) => {
+          nextDetails[userId] = details;
+        });
+        return nextDetails;
+      });
+    };
+
+    fetchUserLocationDetails();
+  }, [userIdsNeedingLocationDetails]);
+
   const markerPoints = useMemo(
     () => normalizedPoints.filter((point) => point.hasCoordinates),
     [normalizedPoints],
@@ -2022,7 +2417,7 @@ const SearchMapView = ({
                     {fallbackPoints.length}/{normalizedPoints.length}
                   </span>
                 </div>
-                <div className="mt-2 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+                <div className="mt-2 grid min-h-0 flex-1 grid-cols-1 items-stretch gap-2 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3 lg:block lg:space-y-2">
                   {fallbackPoints.map((point) => (
                     <Tooltip
                       key={point.id}
@@ -2031,7 +2426,7 @@ const SearchMapView = ({
                           ? null
                           : getDetailsTooltipLabel(point.type)
                       }
-                      wrapperClassName="block"
+                      wrapperClassName="block h-full lg:h-auto"
                     >
                       <div
                         role="button"
@@ -2044,7 +2439,7 @@ const SearchMapView = ({
                             openPoint(point);
                           }
                         }}
-                        className="w-full rounded-lg border border-base-200 bg-white/80 p-2 text-left shadow-soft transition-all duration-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                        className="h-full w-full rounded-lg border border-base-200 bg-white/80 p-2 text-left shadow-soft transition-all duration-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] lg:h-auto"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <EntityMetaLine point={point} />
@@ -2139,7 +2534,6 @@ const SearchMapView = ({
           >
             <MapPopupCard
               point={activePoint}
-              searchType={searchType}
               onClose={closeActivePopup}
               onOpenPoint={(point) => {
                 closeActivePopup();
