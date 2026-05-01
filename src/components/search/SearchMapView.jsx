@@ -2777,7 +2777,7 @@ const SearchMapView = ({
             </MapContainer>
           </div>
 
-          <aside className="flex flex-col border-t border-base-200 bg-base-100/75 p-4 lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:max-h-[520px] lg:w-[260px] lg:overflow-y-auto lg:rounded-xl lg:border-l lg:border-t-0 lg:bg-white/70 lg:backdrop-blur-sm">
+          <aside className="flex flex-col border-t border-base-200 bg-base-100/75 p-4 lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:max-h-[520px] lg:w-[260px] lg:overflow-y-auto lg:rounded-bl-xl lg:border-l lg:border-t-0 lg:bg-white/70 lg:backdrop-blur-sm">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-base-content">Mapped results</h3>
               <span className="text-xs text-base-content/60">
