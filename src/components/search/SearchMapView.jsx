@@ -2701,7 +2701,7 @@ const SearchMapView = ({
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-base-200 bg-base-100/80 shadow-soft">
-        <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="relative min-h-[360px] lg:min-h-[520px]">
           <div className="relative min-h-[360px]">
             {markerPoints.length === 0 && (
               <div className="pointer-events-none absolute left-1/2 top-4 z-[500] w-[min(calc(100%-2rem),26rem)] -translate-x-1/2 rounded-lg border border-base-200 bg-white/90 px-4 py-2 text-center text-sm text-base-content/70 shadow-soft backdrop-blur-sm">
@@ -2774,7 +2774,7 @@ const SearchMapView = ({
             </MapContainer>
           </div>
 
-          <aside className="flex min-h-[260px] flex-col border-t border-base-200 bg-base-100/75 p-4 lg:h-[520px] lg:border-l lg:border-t-0">
+          <aside className="flex flex-col border-t border-base-200 bg-white/85 p-4 backdrop-blur-sm lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:h-[520px] lg:w-[260px] lg:overflow-y-auto lg:border-l lg:border-t-0">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-base-content">Mapped results</h3>
               <span className="text-xs text-base-content/60">
