@@ -1920,7 +1920,7 @@ const SearchPage = () => {
   };
   return (
     <PageContainer
-      title="Search teams or users"
+      title="Search teams, people or open roles"
       titleAlignment="center"
       variant="muted"
     >
