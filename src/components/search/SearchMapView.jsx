@@ -2699,6 +2699,18 @@ const SearchMapView = ({
       selectedRolePoint
     : null;
 
+  const asideRef = useRef(null);
+  const [asideAtFullHeight, setAsideAtFullHeight] = useState(false);
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setAsideAtFullHeight(el.scrollHeight > el.clientHeight);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-base-200 bg-base-100/80 shadow-soft">
@@ -2777,7 +2789,7 @@ const SearchMapView = ({
             </MapContainer>
           </div>
 
-          <aside className={`flex flex-col border-t border-base-200 bg-base-100/75 p-4 lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:max-h-[520px] lg:w-[260px] lg:overflow-y-auto lg:border-l lg:border-t-0 lg:bg-white/70 lg:backdrop-blur-sm${fallbackPoints.length === 0 ? " lg:rounded-bl-xl" : ""}`}>
+          <aside ref={asideRef} className={`flex flex-col border-t border-base-200 bg-base-100/75 p-4 lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:max-h-[520px] lg:w-[260px] lg:overflow-y-auto lg:border-l lg:border-t-0 lg:bg-white/70 lg:backdrop-blur-sm${!asideAtFullHeight ? " lg:rounded-bl-xl" : ""}`}>
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-base-content">Mapped results</h3>
               <span className="text-xs text-base-content/60">
