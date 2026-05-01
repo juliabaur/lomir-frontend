@@ -467,15 +467,6 @@ const SearchPage = () => {
       authOnly: true,
     },
     {
-      value: "proximity",
-      defaultDir: "asc",
-      filterOnly: true,
-      labelAsc: "Distance",
-      shortLabelAsc: "Distance",
-      tooltipAsc: "Filter results by distance from your location",
-      iconAsc: Ruler,
-    },
-    {
       value: "locationPriority",
       sortValue: "proximity",
       defaultDir: "asc",
@@ -488,6 +479,15 @@ const SearchPage = () => {
       iconAsc: MapPin,
       iconRemote: Globe,
       requiresCoordinates: true,
+    },
+    {
+      value: "proximity",
+      defaultDir: "asc",
+      filterOnly: true,
+      labelAsc: "Distance",
+      shortLabelAsc: "Distance",
+      tooltipAsc: "Filter results by distance from your location",
+      iconAsc: Ruler,
     },
     {
       value: "capacity",
