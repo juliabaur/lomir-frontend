@@ -42,6 +42,7 @@ const BooleanSearchInput = ({
   onRemoveBadgePill,
   onSelectTagSuggestion,
   onSelectBadgeSuggestion,
+  leftAdornment = null,
 }) => {
   const [query, setQuery] = useState(initialQuery);
   const [hasBooleanOperators, setHasBooleanOperators] = useState(false);
@@ -66,13 +67,15 @@ const BooleanSearchInput = ({
   });
 
   const showMinQueryHint = query.trim().length > 0 && query.trim().length < 2;
+  const hasLeftAdornment = Boolean(leftAdornment);
+  const leftAdornmentWidthPx = hasLeftAdornment ? 24 : 0;
   const minimumInputWidthPx = query.trim().length > 0 ? 132 : 180;
   const inputTextWidthPx = Math.max(
     minimumInputWidthPx,
     query.trim().length > 0
       ? measuredTextWidths.query + 8
       : measuredTextWidths.placeholder + 12,
-  );
+  ) + leftAdornmentWidthPx;
 
   // Combined pill width calculations across all three groups
   const allPills = [...badgePills, ...focusAreaPills, ...activePills];
@@ -414,21 +417,27 @@ const BooleanSearchInput = ({
                 </div>
               )}
 
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                placeholder={placeholder}
-                className="w-full min-w-0 bg-transparent text-sm focus:outline-none"
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-                minLength={2}
-              />
+              <div className="flex min-w-0 items-center gap-2">
+                {hasLeftAdornment && (
+                  <div className="shrink-0">{leftAdornment}</div>
+                )}
+
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={query}
+                  onChange={handleChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={placeholder}
+                  className="min-w-0 flex-1 bg-transparent text-sm focus:outline-none"
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  minLength={2}
+                />
+              </div>
             </div>
 
             <div className={helperControlsClassName}>

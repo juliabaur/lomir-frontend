@@ -27,6 +27,7 @@ import {
   Sparkles,
   ArrowDownAZ,
   ArrowUpZA,
+  RotateCcw,
   SlidersHorizontal,
   UserPlus,
   UserMinus,
@@ -467,15 +468,6 @@ const SearchPage = () => {
       authOnly: true,
     },
     {
-      value: "proximity",
-      defaultDir: "asc",
-      filterOnly: true,
-      labelAsc: "Distance",
-      shortLabelAsc: "Distance",
-      tooltipAsc: "Filter results by distance from your location",
-      iconAsc: Ruler,
-    },
-    {
       value: "locationPriority",
       sortValue: "proximity",
       defaultDir: "asc",
@@ -488,6 +480,15 @@ const SearchPage = () => {
       iconAsc: MapPin,
       iconRemote: Globe,
       requiresCoordinates: true,
+    },
+    {
+      value: "proximity",
+      defaultDir: "asc",
+      filterOnly: true,
+      labelAsc: "Distance",
+      shortLabelAsc: "Distance",
+      tooltipAsc: "Filter results by distance from your location",
+      iconAsc: Ruler,
     },
     {
       value: "capacity",
@@ -1277,6 +1278,19 @@ const SearchPage = () => {
     setOpenSubmenuKey(null);
   };
 
+  const handleResetSortFilters = () => {
+    setSortBy("name");
+    setSortDir("asc");
+    setMaxDistance(null);
+    setCustomDistanceInput("");
+    setCapacityMode("spots");
+    setOpenRolesOnly(false);
+    setIncludeOwnTeams(true);
+    setIncludeDemoData(true);
+    setOpenSubmenuKey(null);
+    setCurrentPage(1);
+  };
+
   const handleSortChange = (newSortBy) => {
     let newSortDir = sortDir;
 
@@ -1857,14 +1871,19 @@ const SearchPage = () => {
         >
           <div className="mx-auto w-full max-w-full sm:w-fit">
             <div className="flex w-full max-w-full items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSortDropdownToggle}
-                className="shrink-0 rounded-lg p-2 transition-colors"
-                title="Sort options"
-              >
-                <SlidersHorizontal className="w-5 h-5" color={sortIconColor} />
-              </button>
+              <Tooltip content="Sorting & Filtering">
+                <button
+                  type="button"
+                  onClick={handleSortDropdownToggle}
+                  className="shrink-0 rounded-lg p-2 transition-colors"
+                  aria-label="Sorting & Filtering"
+                >
+                  <SlidersHorizontal
+                    className="w-5 h-5"
+                    color={sortIconColor}
+                  />
+                </button>
+              </Tooltip>
 
               <div className="min-w-0 flex-1 sm:w-auto sm:flex-none sm:max-w-full">
                 <BooleanSearchInput
@@ -1886,6 +1905,25 @@ const SearchPage = () => {
                   onSelectTagSuggestion={handleAddTagFilter}
                   onSelectBadgeSuggestion={handleAddBadgeFilter}
                   onSearchSuggestions={handleSearchSuggestions}
+                  leftAdornment={
+                    isSortModified ? (
+                      <div className="transition-all duration-200 opacity-100 scale-100">
+                        <Tooltip content="Reset sorting and filters">
+                          <button
+                            type="button"
+                            onClick={handleResetSortFilters}
+                            className="shrink-0 rounded-lg p-0.5 transition-colors"
+                            aria-label="Reset sorting and filters"
+                          >
+                            <RotateCcw
+                              className="w-3.5 h-3.5"
+                              color="var(--color-primary-focus)"
+                            />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    ) : null
+                  }
                   className="min-w-0 w-full sm:w-auto sm:max-w-full"
                 />
               </div>
