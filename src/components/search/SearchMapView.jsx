@@ -2704,10 +2704,14 @@ const SearchMapView = ({
   useEffect(() => {
     const el = asideRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => {
-      setAsideAtFullHeight(el.scrollHeight > el.clientHeight);
-    });
+    const parent = el.parentElement;
+    const check = () => {
+      if (!parent) return;
+      setAsideAtFullHeight(el.offsetHeight >= parent.clientHeight - 2);
+    };
+    const observer = new ResizeObserver(check);
     observer.observe(el);
+    if (parent) observer.observe(parent);
     return () => observer.disconnect();
   }, []);
 
