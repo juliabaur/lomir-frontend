@@ -27,6 +27,7 @@ import {
   Sparkles,
   ArrowDownAZ,
   ArrowUpZA,
+  RotateCcw,
   SlidersHorizontal,
   UserPlus,
   UserMinus,
@@ -1277,6 +1278,19 @@ const SearchPage = () => {
     setOpenSubmenuKey(null);
   };
 
+  const handleResetSortFilters = () => {
+    setSortBy("name");
+    setSortDir("asc");
+    setMaxDistance(null);
+    setCustomDistanceInput("");
+    setCapacityMode("spots");
+    setOpenRolesOnly(false);
+    setIncludeOwnTeams(true);
+    setIncludeDemoData(true);
+    setOpenSubmenuKey(null);
+    setCurrentPage(1);
+  };
+
   const handleSortChange = (newSortBy) => {
     let newSortDir = sortDir;
 
@@ -1891,6 +1905,25 @@ const SearchPage = () => {
                   onSelectTagSuggestion={handleAddTagFilter}
                   onSelectBadgeSuggestion={handleAddBadgeFilter}
                   onSearchSuggestions={handleSearchSuggestions}
+                  leftAdornment={
+                    isSortModified ? (
+                      <div className="transition-all duration-200 opacity-100 scale-100">
+                        <Tooltip content="Reset sorting and filters">
+                          <button
+                            type="button"
+                            onClick={handleResetSortFilters}
+                            className="shrink-0 rounded-lg p-0.5 transition-colors"
+                            aria-label="Reset sorting and filters"
+                          >
+                            <RotateCcw
+                              className="w-3.5 h-3.5"
+                              color="var(--color-primary-focus)"
+                            />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    ) : null
+                  }
                   className="min-w-0 w-full sm:w-auto sm:max-w-full"
                 />
               </div>
