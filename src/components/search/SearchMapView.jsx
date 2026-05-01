@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AttributionControl,
   Circle,
   MapContainer,
   Marker,
@@ -2698,10 +2699,26 @@ const SearchMapView = ({
       selectedRolePoint
     : null;
 
+  const asideRef = useRef(null);
+  const [asideAtFullHeight, setAsideAtFullHeight] = useState(false);
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    const check = () => {
+      if (!parent) return;
+      setAsideAtFullHeight(el.offsetHeight >= parent.clientHeight - 2);
+    };
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    if (parent) observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-base-200 bg-base-100/80 shadow-soft">
-        <div className="grid min-h-[520px] grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="relative min-h-[360px] lg:min-h-[520px]">
           <div className="relative min-h-[360px]">
             {markerPoints.length === 0 && (
               <div className="pointer-events-none absolute left-1/2 top-4 z-[500] w-[min(calc(100%-2rem),26rem)] -translate-x-1/2 rounded-lg border border-base-200 bg-white/90 px-4 py-2 text-center text-sm text-base-content/70 shadow-soft backdrop-blur-sm">
@@ -2715,7 +2732,9 @@ const SearchMapView = ({
               maxBounds={[[-90, -180], [90, 180]]}
               maxBoundsViscosity={1}
               className="h-[360px] w-full lg:h-[520px]"
+              attributionControl={false}
             >
+              <AttributionControl position="bottomleft" />
               <MapInstanceCapture onReady={setMapInstance} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -2774,7 +2793,7 @@ const SearchMapView = ({
             </MapContainer>
           </div>
 
-          <aside className="flex min-h-[260px] flex-col border-t border-base-200 bg-base-100/75 p-4 lg:h-[520px] lg:border-l lg:border-t-0">
+          <aside ref={asideRef} className={`flex flex-col border-t border-base-200 bg-base-100/75 p-4 lg:absolute lg:right-0 lg:top-0 lg:z-[500] lg:max-h-[520px] lg:w-[260px] lg:overflow-y-auto lg:border-l lg:border-t-0 lg:bg-white/70 lg:backdrop-blur-sm${!asideAtFullHeight ? " lg:rounded-bl-xl" : ""}`}>
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-bold text-base-content">Mapped results</h3>
               <span className="text-xs text-base-content/60">

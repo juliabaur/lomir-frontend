@@ -206,6 +206,41 @@
     border-bottom: 6px solid #ffffff;
     border-left: 6px solid transparent;
   }
+
+  /* --- Lomir: Leaflet zoom controls --- */
+  .leaflet-control-zoom.leaflet-bar {
+    border: none;
+    border-radius: 0.625rem;
+    box-shadow: none;
+    overflow: hidden;
+  }
+
+  .leaflet-control-zoom.leaflet-bar a {
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    background-color: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(var(--blur-amount));
+    -webkit-backdrop-filter: blur(var(--blur-amount));
+    border-bottom: 1px solid var(--color-border);
+    color: var(--color-primary-focus);
+    font-size: 1.1rem;
+    font-weight: 400;
+    transition: background-color 150ms ease;
+  }
+
+  .leaflet-control-zoom.leaflet-bar a:last-child {
+    border-bottom: none;
+  }
+
+  .leaflet-control-zoom.leaflet-bar a:hover {
+    background-color: rgba(255, 255, 255, 0.96);
+  }
+
+  .leaflet-control-zoom.leaflet-bar a.leaflet-disabled {
+    color: var(--color-border);
+    background-color: rgba(255, 255, 255, 0.6);
+  }
 }
 
 :root {

@@ -286,7 +286,7 @@ const SearchPage = () => {
   const [capacityMode, setCapacityMode] = useState("spots");
 
   // ===== RESULT VIEW STATE =====
-  const [resultView, setResultView] = useState("card");
+  const [resultView, setResultView] = useState("map");
 
   // ===== ROLE MATCH CONTEXT STATE =====
   const [matchRoleId, setMatchRoleId] = useState(() => {
@@ -1920,7 +1920,7 @@ const SearchPage = () => {
   };
   return (
     <PageContainer
-      title="Search teams or users"
+      title="Search teams, people or open roles"
       titleAlignment="center"
       variant="muted"
     >
