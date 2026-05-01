@@ -1,5 +1,11 @@
 export const DISTANCE_SUBMENU_TYPE = "distance";
 
+const getRequestSortDir = ({ sortBy, sortDir }) =>
+  sortBy === "proximity" && sortDir === "remote" ? "remote" : sortDir;
+
+export const shouldUseMergedResultPagination = ({ searchType, sortBy }) =>
+  searchType === "all" && sortBy === "proximity";
+
 export const getVisibleSortOptions = ({
   sortOptions,
   searchType,
@@ -10,6 +16,7 @@ export const getVisibleSortOptions = ({
     if (option.teamsOnly && searchType !== "teams") return false;
     if (option.usersOnly && searchType === "teams") return false;
     if (option.value === "proximity" && !userHasCoordinates) return false;
+    if (option.requiresCoordinates && !userHasCoordinates) return false;
     if (option.authOnly && !isAuthenticated) return false;
     return true;
   });
@@ -19,21 +26,12 @@ export const getSortOptionDisplay = ({
   sortBy,
   sortDir,
   isCapacitySpotsSort,
+  maxDistance,
 }) => {
-  const isActive =
-    option.value === "capacity" ? isCapacitySpotsSort : sortBy === option.value;
-  const currentDir = isActive
-    ? option.value === "capacity"
-      ? sortDir
-      : sortBy === option.value
-        ? sortDir
-        : option.defaultDir || "desc"
-    : option.defaultDir || "desc";
-
-  if (currentDir === "asc") {
+  if (option.filterOnly) {
     return {
-      isActive,
-      currentDir,
+      isActive: maxDistance !== null,
+      currentDir: option.defaultDir || "asc",
       IconComponent: option.iconAsc,
       label: option.labelAsc,
       shortLabel: option.shortLabelAsc,
@@ -41,10 +39,41 @@ export const getSortOptionDisplay = ({
     };
   }
 
-  if (currentDir === "remote") {
+  const optionSortValue = option.sortValue ?? option.value;
+  const matchesSort = sortBy === optionSortValue;
+  const isActive =
+    option.value === "capacity"
+      ? isCapacitySpotsSort
+      : matchesSort && (!option.activeDir || sortDir === option.activeDir);
+  const currentDir = isActive
+    ? option.value === "capacity"
+      ? sortDir
+      : matchesSort
+        ? sortDir
+        : option.defaultDir || "desc"
+    : option.defaultDir || "desc";
+  const normalizedDir =
+    option.value === "proximity" && currentDir === "desc" ? "asc" : currentDir;
+  const displayDir =
+    normalizedDir === "remote" && !option.labelRemote
+      ? option.defaultDir || "asc"
+      : normalizedDir;
+
+  if (displayDir === "asc") {
     return {
       isActive,
-      currentDir,
+      currentDir: displayDir,
+      IconComponent: option.iconAsc,
+      label: option.labelAsc,
+      shortLabel: option.shortLabelAsc,
+      tooltip: option.tooltipAsc,
+    };
+  }
+
+  if (displayDir === "remote") {
+    return {
+      isActive,
+      currentDir: displayDir,
       IconComponent: option.iconRemote,
       label: option.labelRemote,
       shortLabel: option.shortLabelRemote,
@@ -106,14 +135,8 @@ export const getActiveCriteriaPills = ({
   } else if (sortBy === "proximity") {
     pills.push({
       key: "sort",
-      label:
-        sortDir === "remote"
-          ? "Remote"
-          : sortDir === "desc"
-            ? "Farthest"
-            : "Nearest",
-      shortLabel:
-        sortDir === "remote" ? "Remote" : sortDir === "desc" ? "Far" : "Near",
+      label: sortDir === "remote" ? "Remote First" : "Nearest First",
+      shortLabel: sortDir === "remote" ? "Remote" : "Near",
     });
   }
 
@@ -178,21 +201,32 @@ export const buildSearchRequestCriteria = ({
   filterBadgeIds,
   matchRoleId,
   excludeTeamId,
-}) => ({
-  mode: hasSearched && searchQuery.trim() ? "search" : "all",
-  query: searchQuery.trim(),
-  searchType,
-  page: currentPage,
-  limit: resultsPerPage,
-  sortBy,
-  sortDir,
-  maxDistance,
-  openRolesOnly: effectiveOpenRolesOnly,
-  excludeOwnTeams: !effectiveIncludeOwnTeams,
-  includeDemoData,
-  capacityMode,
-  tagIds: filterTagIds,
-  badgeIds: filterBadgeIds,
-  roleId: matchRoleId,
-  excludeTeamId,
-});
+}) => {
+  const usesMergedPaginationWindow = shouldUseMergedResultPagination({
+    searchType,
+    sortBy,
+  });
+  const normalizedPage = Math.max(1, Number(currentPage) || 1);
+  const normalizedLimit = Math.max(1, Number(resultsPerPage) || 1);
+
+  return {
+    mode: hasSearched && searchQuery.trim() ? "search" : "all",
+    query: searchQuery.trim(),
+    searchType,
+    page: usesMergedPaginationWindow ? 1 : normalizedPage,
+    limit: usesMergedPaginationWindow
+      ? normalizedPage * normalizedLimit
+      : normalizedLimit,
+    sortBy,
+    sortDir: getRequestSortDir({ sortBy, sortDir }),
+    maxDistance,
+    openRolesOnly: effectiveOpenRolesOnly,
+    excludeOwnTeams: !effectiveIncludeOwnTeams,
+    includeDemoData,
+    capacityMode,
+    tagIds: filterTagIds,
+    badgeIds: filterBadgeIds,
+    roleId: matchRoleId,
+    excludeTeamId,
+  };
+};
