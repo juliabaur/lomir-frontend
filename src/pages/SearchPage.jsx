@@ -1871,12 +1871,22 @@ const SearchPage = () => {
         >
           <div className="mx-auto w-full max-w-full sm:w-fit">
             <div className="flex w-full max-w-full items-center gap-2">
-              <Tooltip content="Sorting & Filtering">
+              <Tooltip
+                content={
+                  showSortDropdown
+                    ? "Hide Filtering & Sorting Options"
+                    : "Show Filtering & Sorting Options"
+                }
+              >
                 <button
                   type="button"
                   onClick={handleSortDropdownToggle}
                   className="shrink-0 rounded-lg p-2 transition-colors"
-                  aria-label="Sorting & Filtering"
+                  aria-label={
+                    showSortDropdown
+                      ? "Hide Filtering & Sorting Options"
+                      : "Show Filtering & Sorting Options"
+                  }
                 >
                   <SlidersHorizontal
                     className="w-5 h-5"
