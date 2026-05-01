@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  AttributionControl,
   Circle,
   MapContainer,
   Marker,
@@ -2715,7 +2716,9 @@ const SearchMapView = ({
               maxBounds={[[-90, -180], [90, 180]]}
               maxBoundsViscosity={1}
               className="h-[360px] w-full lg:h-[520px]"
+              attributionControl={false}
             >
+              <AttributionControl position="bottomleft" />
               <MapInstanceCapture onReady={setMapInstance} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
