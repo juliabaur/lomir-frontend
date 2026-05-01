@@ -211,7 +211,7 @@
   .leaflet-control-zoom.leaflet-bar {
     border: none;
     border-radius: 0.625rem;
-    box-shadow: var(--shadow-soft);
+    box-shadow: none;
     overflow: hidden;
   }
 
