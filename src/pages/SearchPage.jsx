@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
   UserPlus,
   UserMinus,
+  Ruler,
   MapPin,
   Globe,
   Target,
@@ -51,6 +52,7 @@ import {
   getActiveCriteriaPills,
   getSortOptionDisplay,
   getVisibleSortOptions,
+  shouldUseMergedResultPagination,
 } from "./searchPageHelpers";
 
 import {
@@ -63,6 +65,11 @@ import {
 } from "../utils/locationUtils";
 
 const DISTANCE_UNAVAILABLE_SENTINEL_KM = 999999;
+const RESULT_TYPE_TIE_BREAKER_ORDER = {
+  team: 0,
+  user: 1,
+  role: 2,
+};
 
 const getFilterableDistanceKm = (item) => {
   const matchDetails = item?.matchDetails ?? item?.match_details ?? null;
@@ -81,6 +88,122 @@ const getFilterableDistanceKm = (item) => {
     ? distance
     : null;
 };
+
+const getProximitySortValue = (item) =>
+  getFilterableDistanceKm(item) ?? DISTANCE_UNAVAILABLE_SENTINEL_KM;
+
+const getUserDisplayName = (u) =>
+  (
+    (u?.first_name || u?.firstName || "") +
+    " " +
+    (u?.last_name || u?.lastName || "")
+  ).trim().toLowerCase() || (u?.username || "").toLowerCase();
+
+const getSearchItemDisplayName = (item) => {
+  if (!item) return "";
+
+  if (item._resultType === "team") {
+    return (item.name || "").toLowerCase();
+  }
+
+  if (item._resultType === "role") {
+    return String(
+      item.roleName ??
+        item.role_name ??
+        item.name ??
+        item.teamName ??
+        item.team_name ??
+        "",
+    ).toLowerCase();
+  }
+
+  return getUserDisplayName(item);
+};
+
+const getSearchItemActivityTime = (item) => {
+  if (!item) return 0;
+
+  const value =
+    item._resultType === "role"
+      ? item.updatedAt ?? item.updated_at ?? item.createdAt ?? item.created_at
+      : item.last_active_at ??
+        item.lastActiveAt ??
+        item.last_active ??
+        item.lastActive ??
+        item.updated_at ??
+        item.updatedAt ??
+        item.created_at ??
+        item.createdAt;
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const compareSearchItemTieBreakers = (a, b) => {
+  const groupIndexCompare =
+    (a?._resultGroupIndex ?? Number.MAX_SAFE_INTEGER) -
+    (b?._resultGroupIndex ?? Number.MAX_SAFE_INTEGER);
+
+  if (groupIndexCompare !== 0) return groupIndexCompare;
+
+  const resultTypeCompare =
+    (RESULT_TYPE_TIE_BREAKER_ORDER[a?._resultType] ??
+      Number.MAX_SAFE_INTEGER) -
+    (RESULT_TYPE_TIE_BREAKER_ORDER[b?._resultType] ??
+      Number.MAX_SAFE_INTEGER);
+
+  if (resultTypeCompare !== 0) return resultTypeCompare;
+
+  const activityCompare =
+    getSearchItemActivityTime(b) - getSearchItemActivityTime(a);
+
+  if (activityCompare !== 0) return activityCompare;
+
+  const nameCompare = getSearchItemDisplayName(a).localeCompare(
+    getSearchItemDisplayName(b),
+  );
+
+  if (nameCompare !== 0) return nameCompare;
+
+  return `${a?._resultType ?? ""}-${a?.id ?? ""}`.localeCompare(
+    `${b?._resultType ?? ""}-${b?.id ?? ""}`,
+  );
+};
+
+const isTruthyRemoteFlag = (value) =>
+  value === true || value === 1 || value === "true" || value === "1";
+
+const isRemoteSearchItem = (item) =>
+  isTruthyRemoteFlag(item?.is_remote) ||
+  isTruthyRemoteFlag(item?.isRemote) ||
+  isTruthyRemoteFlag(item?.role?.is_remote) ||
+  isTruthyRemoteFlag(item?.role?.isRemote);
+
+const getNearestSortPriority = (item) => {
+  if (isRemoteSearchItem(item)) return 2;
+  return getFilterableDistanceKm(item) === null ? 1 : 0;
+};
+
+const compareProximityItems = (a, b, sortDir) => {
+  const remoteCompare =
+    sortDir === "remote"
+      ? Number(isRemoteSearchItem(b)) - Number(isRemoteSearchItem(a))
+      : getNearestSortPriority(a) - getNearestSortPriority(b);
+
+  if (remoteCompare !== 0) return remoteCompare;
+
+  const aDist = getProximitySortValue(a);
+  const bDist = getProximitySortValue(b);
+  const distanceCompare =
+    sortDir === "remote" ? bDist - aDist : aDist - bDist;
+
+  return distanceCompare !== 0
+    ? distanceCompare
+    : compareSearchItemTieBreakers(a, b);
+};
+
+const sortByProximity = (items, sortDir) =>
+  [...items].sort((a, b) => compareProximityItems(a, b, sortDir));
 
 const SearchPage = () => {
   const location = useLocation();
@@ -346,14 +469,25 @@ const SearchPage = () => {
     {
       value: "proximity",
       defaultDir: "asc",
-      labelAsc: "Nearest",
-      labelRemote: "Remote",
-      shortLabelAsc: "Near",
-      shortLabelRemote: "Remote",
-      tooltipAsc: "Show the nearest results first",
+      filterOnly: true,
+      labelAsc: "Distance",
+      shortLabelAsc: "Distance",
+      tooltipAsc: "Filter results by distance from your location",
+      iconAsc: Ruler,
+    },
+    {
+      value: "locationPriority",
+      sortValue: "proximity",
+      defaultDir: "asc",
+      labelAsc: "Nearest First",
+      labelRemote: "Remote First",
+      shortLabelAsc: "Near 1st",
+      shortLabelRemote: "Remote 1st",
+      tooltipAsc: "Keep nearby results ahead of remote-friendly results",
       tooltipRemote: "Show remote-friendly results first",
       iconAsc: MapPin,
       iconRemote: Globe,
+      requiresCoordinates: true,
     },
     {
       value: "capacity",
@@ -514,8 +648,32 @@ const SearchPage = () => {
         ? displaySearchResults.roles
         : [],
   };
-
+  const usesClientMergedPagination = shouldUseMergedResultPagination({
+    searchType,
+    sortBy,
+  });
   const effectivePagination = useMemo(() => {
+    if (usesClientMergedPagination) {
+      const totalItems =
+        (pagination.totalTeams || 0) +
+        (pagination.totalUsers || 0) +
+        (pagination.totalRoles || 0);
+      const totalPages = Math.max(
+        1,
+        Math.ceil(totalItems / Math.max(1, resultsPerPage)),
+      );
+
+      return {
+        ...pagination,
+        page: currentPage,
+        limit: resultsPerPage,
+        totalItems,
+        totalPages,
+        hasNextPage: currentPage < totalPages,
+        hasPrevPage: currentPage > 1,
+      };
+    }
+
     if (
       !shouldExcludeCurrentUserFromBestMatch ||
       searchType === "teams" ||
@@ -547,49 +705,37 @@ const SearchPage = () => {
     };
   }, [
     pagination,
+    currentPage,
     resultsPerPage,
     searchType,
     shouldExcludeCurrentUserFromBestMatch,
+    usesClientMergedPagination,
   ]);
-
-  const getUserDisplayName = (u) =>
-    (
-      (u.first_name || u.firstName || "") +
-      " " +
-      (u.last_name || u.lastName || "")
-    ).trim().toLowerCase() || (u.username || "").toLowerCase();
 
   const mergedDisplayItems = (() => {
     if (searchType !== "all") return null;
-    const teams = filteredResults.teams.map((t) => ({
+    const teams = filteredResults.teams.map((t, index) => ({
       ...t,
       _resultType: "team",
+      _resultGroupIndex: index,
     }));
-    const users = filteredResults.users.map((u) => ({
+    const users = filteredResults.users.map((u, index) => ({
       ...u,
       _resultType: "user",
+      _resultGroupIndex: index,
     }));
-    const roles = filteredResults.roles.map((r) => ({
+    const roles = filteredResults.roles.map((r, index) => ({
       ...r,
       _resultType: "role",
+      _resultGroupIndex: index,
     }));
     const combined = [...teams, ...users, ...roles];
     combined.sort((a, b) => {
-      const aIsTeam = a._resultType === "team";
-      const bIsTeam = b._resultType === "team";
       const aIsRole = a._resultType === "role";
       const bIsRole = b._resultType === "role";
       if (sortBy === "name") {
-        const aName = aIsTeam
-          ? (a.name || "").toLowerCase()
-          : aIsRole
-            ? (a.roleName ?? a.role_name ?? "").toLowerCase()
-            : getUserDisplayName(a);
-        const bName = bIsTeam
-          ? (b.name || "").toLowerCase()
-          : bIsRole
-            ? (b.roleName ?? b.role_name ?? "").toLowerCase()
-            : getUserDisplayName(b);
+        const aName = getSearchItemDisplayName(a);
+        const bName = getSearchItemDisplayName(b);
         const cmp = aName.localeCompare(bName);
         return sortDir === "asc" ? cmp : -cmp;
       }
@@ -621,9 +767,7 @@ const SearchPage = () => {
         return sortDir === "asc" ? getDate(a) - getDate(b) : getDate(b) - getDate(a);
       }
       if (sortBy === "proximity") {
-        const aDist = a.distance_km ?? a.distanceKm ?? Infinity;
-        const bDist = b.distance_km ?? b.distanceKm ?? Infinity;
-        return aDist - bDist;
+        return compareProximityItems(a, b, sortDir);
       }
       if (sortBy === "match") {
         const aScore = getResultMatchScore(a);
@@ -632,7 +776,12 @@ const SearchPage = () => {
       }
       return 0;
     });
-    return combined.slice(0, resultsPerPage);
+
+    const startIndex = usesClientMergedPagination
+      ? (currentPage - 1) * resultsPerPage
+      : 0;
+
+    return combined.slice(startIndex, startIndex + resultsPerPage);
   })();
 
   const sortedUsers = (() => {
@@ -641,6 +790,9 @@ const SearchPage = () => {
       return [...users].sort(
         (a, b) => getResultMatchScore(b) - getResultMatchScore(a),
       );
+    }
+    if (sortBy === "proximity") {
+      return sortByProximity(users, sortDir);
     }
     if (sortBy !== "name") return users;
     return [...users].sort((a, b) => {
@@ -656,8 +808,16 @@ const SearchPage = () => {
         (a, b) => getResultMatchScore(b) - getResultMatchScore(a),
       );
     }
+    if (sortBy === "proximity") {
+      return sortByProximity(teams, sortDir);
+    }
     return teams;
   })();
+
+  const sortedRoles =
+    sortBy === "proximity"
+      ? sortByProximity(filteredResults.roles, sortDir)
+      : filteredResults.roles;
 
   const displayedTeams = mergedDisplayItems
     ? []
@@ -673,7 +833,7 @@ const SearchPage = () => {
     searchType === "all"
       ? mergedDisplayItems
       : searchType === "roles"
-        ? filteredResults.roles.map((role) => ({ ...role, _resultType: "role" }))
+        ? sortedRoles.map((role) => ({ ...role, _resultType: "role" }))
         : [
             ...displayedTeams.map((team) => ({ ...team, _resultType: "team" })),
             ...displayedUsers.map((matchedUser) => ({
@@ -709,6 +869,8 @@ const SearchPage = () => {
     searchType === "teams" && sortBy === "capacity" && capacityMode === "spots";
   const isCapacityRolesSort =
     searchType === "teams" && sortBy === "capacity" && capacityMode === "roles";
+  const shouldShowLocationContext =
+    sortBy === "proximity" || maxDistance !== null || sortBy === "match";
 
   const activeSubmenuKey = showSortDropdown ? openSubmenuKey : null;
 
@@ -1120,7 +1282,7 @@ const SearchPage = () => {
 
     if (newSortBy === sortBy) {
       if (newSortBy === "proximity") {
-        newSortDir = sortDir === "remote" ? "asc" : "remote";
+        newSortDir = "asc";
       } else if (newSortBy === "capacity") {
         newSortDir = sortDir === "desc" ? "asc" : "desc";
       } else if (newSortBy === "match") {
@@ -1147,13 +1309,20 @@ const SearchPage = () => {
       }
     }
 
-    if (newSortBy === "proximity" && newSortDir === "remote") {
-      setSearchType("teams");
-      setMaxDistance(null);
-      setCustomDistanceInput("");
-    }
-
     setSortBy(newSortBy);
+    setSortDir(newSortDir);
+    setCurrentPage(1);
+  };
+
+  const handleLocationPriorityToggle = () => {
+    const newSortDir =
+      sortBy !== "proximity"
+        ? "asc"
+        : sortDir === "remote"
+          ? "asc"
+          : "remote";
+
+    setSortBy("proximity");
     setSortDir(newSortDir);
     setCurrentPage(1);
   };
@@ -1165,8 +1334,13 @@ const SearchPage = () => {
       return;
     }
 
+    if (optionValue === "locationPriority") {
+      handleLocationPriorityToggle();
+      setOpenSubmenuKey(null);
+      return;
+    }
+
     if (optionValue === "proximity") {
-      handleSortChange("proximity");
       setOpenSubmenuKey(DISTANCE_SUBMENU_TYPE);
       return;
     }
@@ -1246,9 +1420,6 @@ const SearchPage = () => {
       setSortDir("asc");
     }
 
-    if (type !== "teams" && sortBy === "proximity" && sortDir === "remote") {
-      setSortDir("asc");
-    }
   };
 
   const handleOpenRolesOnlyToggle = () => {
@@ -1436,9 +1607,6 @@ const SearchPage = () => {
 
   const renderSortSubmenuPortal = () => {
     if (!activeSubmenuKey || !submenuPosition) return null;
-    if (activeSubmenuKey === DISTANCE_SUBMENU_TYPE && sortDir === "remote") {
-      return null;
-    }
 
     const submenuContent = (
       <div ref={submenuRef}>
@@ -1744,6 +1912,7 @@ const SearchPage = () => {
                           sortBy,
                           sortDir,
                           isCapacitySpotsSort,
+                          maxDistance,
                         });
                       const optionButton = (
                         <button
@@ -1912,7 +2081,7 @@ const SearchPage = () => {
                   <span className="text-sm font-normal text-base-content/60 ml-2">
                     (
                     {searchType === "all"
-                      ? `${filteredResults.teams.length + filteredResults.users.length + filteredResults.roles.length} results`
+                      ? `${effectivePagination.totalItems} results`
                       : searchType === "teams"
                         ? `${effectivePagination.totalTeams} results`
                         : searchType === "users"
@@ -1984,11 +2153,7 @@ const SearchPage = () => {
                   showMatchHighlights={sortBy === "match"}
                   showMatchScore={sortBy === "match"}
                   viewerLocation={viewerDistanceSource}
-                  proximityRadiusKm={
-                    sortBy === "proximity" && sortDir !== "remote"
-                      ? maxDistance
-                      : null
-                  }
+                  proximityRadiusKm={maxDistance !== null ? maxDistance : null}
                 />
               )}
 
@@ -2009,9 +2174,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode="list"
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2030,9 +2193,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView === "list" ? "list" : resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2059,9 +2220,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode="list"
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2085,9 +2244,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2106,9 +2263,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView === "list" ? "list" : resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2135,9 +2290,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2149,7 +2302,7 @@ const SearchPage = () => {
 
               {searchType === "roles" && resultView === "list" && (
                 <div className="background-opacity bg-opacity-70 shadow-soft rounded-xl divide-y divide-base-200">
-                  {filteredResults.roles.map((role) => (
+                  {sortedRoles.map((role) => (
                     <VacantRoleCard
                       key={`role-${role.id}`}
                       role={role}
@@ -2158,9 +2311,7 @@ const SearchPage = () => {
                       hideActions
                       viewMode="list"
                       activeFilters={{
-                        showLocation:
-                          (sortBy === "proximity" && sortDir !== "remote") ||
-                          sortBy === "match",
+                        showLocation: shouldShowLocationContext,
                         showTags: sortBy === "match",
                         showBadges: sortBy === "match",
                       }}
@@ -2180,7 +2331,7 @@ const SearchPage = () => {
                   lg={resultView === "mini" ? 4 : 3}
                   gap={resultView === "mini" ? 2 : 6}
                 >
-                  {filteredResults.roles.map((role) => (
+                  {sortedRoles.map((role) => (
                     <VacantRoleCard
                       key={`role-${role.id}`}
                       role={role}
@@ -2189,9 +2340,7 @@ const SearchPage = () => {
                       hideActions
                       viewMode={resultView}
                       activeFilters={{
-                        showLocation:
-                          (sortBy === "proximity" && sortDir !== "remote") ||
-                          sortBy === "match",
+                        showLocation: shouldShowLocationContext,
                         showTags: sortBy === "match",
                         showBadges: sortBy === "match",
                       }}
