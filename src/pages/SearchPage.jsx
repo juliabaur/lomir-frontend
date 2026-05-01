@@ -1857,14 +1857,19 @@ const SearchPage = () => {
         >
           <div className="mx-auto w-full max-w-full sm:w-fit">
             <div className="flex w-full max-w-full items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSortDropdownToggle}
-                className="shrink-0 rounded-lg p-2 transition-colors"
-                title="Sort options"
-              >
-                <SlidersHorizontal className="w-5 h-5" color={sortIconColor} />
-              </button>
+              <Tooltip content="Sorting & Filtering">
+                <button
+                  type="button"
+                  onClick={handleSortDropdownToggle}
+                  className="shrink-0 rounded-lg p-2 transition-colors"
+                  aria-label="Sorting & Filtering"
+                >
+                  <SlidersHorizontal
+                    className="w-5 h-5"
+                    color={sortIconColor}
+                  />
+                </button>
+              </Tooltip>
 
               <div className="min-w-0 flex-1 sm:w-auto sm:flex-none sm:max-w-full">
                 <BooleanSearchInput
