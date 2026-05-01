@@ -23,6 +23,7 @@ import {
   UserSearch,
   Users2,
   Clock,
+  Filter,
   FlaskConical,
   Sparkles,
   ArrowDownAZ,
@@ -71,6 +72,13 @@ const RESULT_TYPE_TIE_BREAKER_ORDER = {
   user: 1,
   role: 2,
 };
+const SORTING_OPTION_VALUES = new Set([
+  "name",
+  "recent",
+  "newest",
+  "match",
+  "locationPriority",
+]);
 
 const getFilterableDistanceKm = (item) => {
   const matchDetails = item?.matchDetails ?? item?.match_details ?? null;
@@ -254,6 +262,7 @@ const SearchPage = () => {
     return "asc";
   });
   const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [showFilterOptions, setShowFilterOptions] = useState(false);
   const [openSubmenuKey, setOpenSubmenuKey] = useState(null);
   const sortFilterRef = useRef(null);
   const portalContainerRef = useRef(null);
@@ -873,7 +882,8 @@ const SearchPage = () => {
   const shouldShowLocationContext =
     sortBy === "proximity" || maxDistance !== null || sortBy === "match";
 
-  const activeSubmenuKey = showSortDropdown ? openSubmenuKey : null;
+  const activeSubmenuKey =
+    showSortDropdown && showFilterOptions ? openSubmenuKey : null;
 
   const submenuAnchorSortKey =
     activeSubmenuKey === "capacity"
@@ -887,6 +897,12 @@ const SearchPage = () => {
     userHasCoordinates,
     isAuthenticated,
   });
+  const visibleSortingOptions = visibleSortOptions.filter((option) =>
+    SORTING_OPTION_VALUES.has(option.value),
+  );
+  const visibleFilterOptions = visibleSortOptions.filter(
+    (option) => !SORTING_OPTION_VALUES.has(option.value),
+  );
 
   const fetchData = useCallback(
     async (criteria) => {
@@ -1101,6 +1117,12 @@ const SearchPage = () => {
   useEffect(() => {
     if (!showSortDropdown) {
       setOpenSubmenuKey(null);
+      setShowFilterOptions(false);
+      return;
+    }
+
+    if (!showFilterOptions) {
+      setOpenSubmenuKey(null);
       return;
     }
 
@@ -1111,7 +1133,13 @@ const SearchPage = () => {
     if (openSubmenuKey === DISTANCE_SUBMENU_TYPE && !userHasCoordinates) {
       setOpenSubmenuKey(null);
     }
-  }, [showSortDropdown, openSubmenuKey, searchType, userHasCoordinates]);
+  }, [
+    showSortDropdown,
+    showFilterOptions,
+    openSubmenuKey,
+    searchType,
+    userHasCoordinates,
+  ]);
 
   useEffect(() => {
     if (sortBy === "proximity" && sortDir === "desc") {
@@ -1271,6 +1299,13 @@ const SearchPage = () => {
     setShowSortDropdown((prev) => !prev);
   };
 
+  const handleFilterOptionsToggle = () => {
+    if (showFilterOptions) {
+      setOpenSubmenuKey(null);
+    }
+    setShowFilterOptions((prev) => !prev);
+  };
+
   const resetSortToDefault = () => {
     setSortBy("name");
     setSortDir("asc");
@@ -1288,6 +1323,7 @@ const SearchPage = () => {
     setIncludeOwnTeams(true);
     setIncludeDemoData(true);
     setOpenSubmenuKey(null);
+    setShowFilterOptions(false);
     setCurrentPage(1);
   };
 
@@ -1614,10 +1650,89 @@ const SearchPage = () => {
     (sortBy === "capacity" && capacityMode !== "spots") ||
     (customDistanceInput && customDistanceInput.trim() !== "");
 
+  const isFilterOptionsActive =
+    showFilterOptions ||
+    maxDistance !== null ||
+    sortBy === "capacity" ||
+    effectiveOpenRolesOnly ||
+    !effectiveIncludeOwnTeams ||
+    !includeDemoData ||
+    (customDistanceInput && customDistanceInput.trim() !== "");
+
   const sortIconColor = isSortModified
     ? "var(--color-primary)"
     : "var(--color-primary-focus)";
   const IncludeOwnTeamsIcon = Users2;
+
+  const renderToolbarOption = (option) => {
+    const { isActive, IconComponent, label, shortLabel, tooltip } =
+      getSortOptionDisplay({
+        option,
+        sortBy,
+        sortDir,
+        isCapacitySpotsSort,
+        maxDistance,
+      });
+    const optionButton = (
+      <button
+        ref={(node) => {
+          sortButtonRefs.current[option.value] = node;
+        }}
+        type="button"
+        onClick={() => handleTopLevelSortOptionClick(option.value)}
+        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+          isActive
+            ? "text-[var(--color-primary)] font-bold"
+            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+        }`}
+        disabled={loading}
+        aria-label={tooltip ? `${label} - ${tooltip}` : label}
+      >
+        <IconComponent className="w-3.5 h-3.5 shrink-0" />
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{shortLabel}</span>
+      </button>
+    );
+
+    return tooltip ? (
+      <Tooltip
+        key={option.value}
+        content={tooltip}
+        wrapperClassName="inline-flex items-center shrink-0"
+      >
+        {optionButton}
+      </Tooltip>
+    ) : (
+      <React.Fragment key={option.value}>{optionButton}</React.Fragment>
+    );
+  };
+
+  const renderFilterOptionsToggle = () => (
+    <Tooltip
+      content={
+        showFilterOptions ? "Hide filter controls" : "Show filter controls"
+      }
+      wrapperClassName="inline-flex items-center shrink-0"
+    >
+      <button
+        type="button"
+        onClick={handleFilterOptionsToggle}
+        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+          isFilterOptionsActive
+            ? "text-[var(--color-primary)] font-bold"
+            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+        }`}
+        disabled={loading}
+        aria-label={
+          showFilterOptions ? "Hide filter controls" : "Show filter controls"
+        }
+      >
+        <Filter className="w-3.5 h-3.5 shrink-0" />
+        <span className="hidden sm:inline">{showFilterOptions ? "Hide Filters" : "Show Filters ..."}</span>
+        <span className="sm:hidden">{showFilterOptions ? "Hide Filters" : "Filters ..."}</span>
+      </button>
+    </Tooltip>
+  );
 
   const renderSortSubmenuPortal = () => {
     if (!activeSubmenuKey || !submenuPosition) return null;
@@ -1871,12 +1986,22 @@ const SearchPage = () => {
         >
           <div className="mx-auto w-full max-w-full sm:w-fit">
             <div className="flex w-full max-w-full items-center gap-2">
-              <Tooltip content="Sorting & Filtering">
+              <Tooltip
+                content={
+                  showSortDropdown
+                    ? "Hide Filtering & Sorting Options"
+                    : "Show Filtering & Sorting Options"
+                }
+              >
                 <button
                   type="button"
                   onClick={handleSortDropdownToggle}
                   className="shrink-0 rounded-lg p-2 transition-colors"
-                  aria-label="Sorting & Filtering"
+                  aria-label={
+                    showSortDropdown
+                      ? "Hide Filtering & Sorting Options"
+                      : "Show Filtering & Sorting Options"
+                  }
                 >
                   <SlidersHorizontal
                     className="w-5 h-5"
@@ -1931,147 +2056,113 @@ const SearchPage = () => {
 
             {showSortDropdown && (
               <div className="mt-2 py-1 pl-11">
-                <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
-                  <div
-                    role="group"
-                    aria-label="Sort options"
-                    className="contents"
-                  >
-                    {visibleSortOptions.map((option) => {
-                      const {
-                        isActive,
-                        IconComponent,
-                        label,
-                        shortLabel,
-                        tooltip,
-                      } =
-                        getSortOptionDisplay({
-                          option,
-                          sortBy,
-                          sortDir,
-                          isCapacitySpotsSort,
-                          maxDistance,
-                        });
-                      const optionButton = (
-                        <button
-                          ref={(node) => {
-                            sortButtonRefs.current[option.value] = node;
-                          }}
-                          type="button"
-                          onClick={() =>
-                            handleTopLevelSortOptionClick(option.value)
-                          }
-                          className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                            isActive
-                              ? "text-[var(--color-primary)] font-bold"
-                              : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                          }`}
-                          disabled={loading}
-                          aria-label={tooltip ? `${label} - ${tooltip}` : label}
-                        >
-                          <IconComponent className="w-3.5 h-3.5 shrink-0" />
-                          <span className="hidden sm:inline">{label}</span>
-                          <span className="sm:hidden">{shortLabel}</span>
-                        </button>
-                      );
-
-                      return tooltip ? (
-                        <Tooltip
-                          key={option.value}
-                          content={tooltip}
-                          wrapperClassName="inline-flex items-center shrink-0"
-                        >
-                          {optionButton}
-                        </Tooltip>
-                      ) : (
-                        <React.Fragment key={option.value}>
-                          {optionButton}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-
-                  {showIncludeOwnTeamsFilter && (
+                <div className="space-y-[6px]">
+                  <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
                     <div
                       role="group"
-                      aria-label="Search filters"
+                      aria-label="Sort options"
                       className="contents"
                     >
-                      <Tooltip
-                        content={
-                          effectiveIncludeOwnTeams
-                            ? "Include My Teams"
-                            : "Exclude My Teams"
-                        }
-                        wrapperClassName="inline-flex items-center shrink-0"
+                      {visibleSortingOptions.map(renderToolbarOption)}
+                    </div>
+
+                    {!showFilterOptions && renderFilterOptionsToggle()}
+                  </div>
+
+                  {showFilterOptions && (
+                    <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
+                      {renderFilterOptionsToggle()}
+                      <div
+                        role="group"
+                        aria-label="Filter options"
+                        className="contents"
                       >
-                        <button
-                          type="button"
-                          onClick={handleIncludeOwnTeamsToggle}
-                          className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                            !effectiveIncludeOwnTeams
-                              ? "text-[var(--color-primary)] font-bold"
-                              : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                          }`}
-                          disabled={loading}
-                          aria-label={
-                            effectiveIncludeOwnTeams
-                              ? "Include My Teams"
-                              : "Exclude My Teams"
-                          }
+                        {visibleFilterOptions.map(renderToolbarOption)}
+                      </div>
+
+                      {showIncludeOwnTeamsFilter && (
+                        <div
+                          role="group"
+                          aria-label="Search filters"
+                          className="contents"
                         >
-                          <IncludeOwnTeamsIcon className="w-3.5 h-3.5 shrink-0" />
-                          <span>
-                            {effectiveIncludeOwnTeams
-                              ? "+ My Teams"
-                              : "- My Teams"}
-                          </span>
-                        </button>
-                      </Tooltip>
+                          <Tooltip
+                            content={
+                              effectiveIncludeOwnTeams
+                                ? "Include My Teams"
+                                : "Exclude My Teams"
+                            }
+                            wrapperClassName="inline-flex items-center shrink-0"
+                          >
+                            <button
+                              type="button"
+                              onClick={handleIncludeOwnTeamsToggle}
+                              className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+                                !effectiveIncludeOwnTeams
+                                  ? "text-[var(--color-primary)] font-bold"
+                                  : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+                              }`}
+                              disabled={loading}
+                              aria-label={
+                                effectiveIncludeOwnTeams
+                                  ? "Include My Teams"
+                                  : "Exclude My Teams"
+                              }
+                            >
+                              <IncludeOwnTeamsIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span>
+                                {effectiveIncludeOwnTeams
+                                  ? "+ My Teams"
+                                  : "- My Teams"}
+                              </span>
+                            </button>
+                          </Tooltip>
+                        </div>
+                      )}
+
+                      <div
+                        role="group"
+                        aria-label="Demo data filter"
+                        className="contents"
+                      >
+                        <Tooltip
+                          content={
+                            includeDemoData
+                              ? "Include test/demo profiles, roles and teams"
+                              : "Show only real users, roles and teams"
+                          }
+                          wrapperClassName="inline-flex items-center shrink-0"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIncludeDemoData((prev) => !prev);
+                              setCurrentPage(1);
+                            }}
+                            className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+                              !includeDemoData
+                                ? "text-[var(--color-primary)] font-bold"
+                                : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+                            }`}
+                            disabled={loading}
+                            aria-label={
+                              includeDemoData
+                                ? "Include test/demo profiles, roles and teams"
+                                : "Show only real users, roles and teams"
+                            }
+                          >
+                            <FlaskConical className="w-3.5 h-3.5 shrink-0" />
+                            <span className="hidden sm:inline">
+                              {includeDemoData ? "+ Demo Data" : "- Demo Data"}
+                            </span>
+                            <span className="sm:hidden">
+                              {includeDemoData ? "+ Demo" : "- Demo"}
+                            </span>
+                          </button>
+                        </Tooltip>
+                      </div>
                     </div>
                   )}
-
-                  <div
-                    role="group"
-                    aria-label="Demo data filter"
-                    className="contents"
-                  >
-                    <Tooltip
-                      content={
-                        includeDemoData
-                          ? "Include test/demo profiles, roles and teams"
-                          : "Show only real users, roles and teams"
-                      }
-                      wrapperClassName="inline-flex items-center shrink-0"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIncludeDemoData((prev) => !prev);
-                          setCurrentPage(1);
-                        }}
-                        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                          !includeDemoData
-                            ? "text-[var(--color-primary)] font-bold"
-                            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                        }`}
-                        disabled={loading}
-                        aria-label={
-                          includeDemoData
-                            ? "Include test/demo profiles, roles and teams"
-                            : "Show only real users, roles and teams"
-                        }
-                      >
-                        <FlaskConical className="w-3.5 h-3.5 shrink-0" />
-                        <span className="hidden sm:inline">
-                          {includeDemoData ? "+ Demo Data" : "- Demo Data"}
-                        </span>
-                        <span className="sm:hidden">
-                          {includeDemoData ? "+ Demo" : "- Demo"}
-                        </span>
-                      </button>
-                    </Tooltip>
-                  </div>
                 </div>
               </div>
             )}
