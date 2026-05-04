@@ -1770,7 +1770,7 @@ const VacantRoleDetailsModal = ({
                   />
                 ) : null}
                 <div
-                  className="avatar-fallback bg-success text-white rounded-full w-full h-full flex items-center justify-center absolute inset-0"
+                  className="avatar-fallback bg-[var(--color-primary-focus)] text-white rounded-full w-full h-full flex items-center justify-center absolute inset-0"
                   style={{ display: filledRoleAvatarUrl ? "none" : "flex" }}
                 >
                   <span className="text-2xl font-semibold">
@@ -2451,7 +2451,7 @@ const VacantRoleDetailsModal = ({
                               />
                             ) : null}
                             <div
-                              className="avatar-fallback bg-primary text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
+                              className="avatar-fallback bg-[var(--color-primary-focus)] text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
                               style={{ display: avatarUrl ? "none" : "flex" }}
                             >
                               <span className="text-lg">{initials}</span>
@@ -2665,7 +2665,7 @@ const VacantRoleDetailsModal = ({
                               />
                             ) : null}
                             <div
-                              className="avatar-fallback bg-primary text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
+                              className="avatar-fallback bg-[var(--color-primary-focus)] text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
                               style={{ display: avatarUrl ? "none" : "flex" }}
                             >
                               <span className="text-lg">{initials}</span>
@@ -2835,7 +2835,7 @@ const VacantRoleDetailsModal = ({
                               />
                             ) : null}
                             <div
-                              className="avatar-fallback bg-primary text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
+                              className="avatar-fallback bg-[var(--color-primary-focus)] text-primary-content rounded-full w-full h-full flex items-center justify-center absolute inset-0"
                               style={{ display: avatarUrl ? "none" : "flex" }}
                             >
                               <span className="text-lg">{initials}</span>

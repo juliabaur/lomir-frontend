@@ -17,6 +17,16 @@ export const getApiErrorMessage = (error) => {
   return "Something went wrong";
 };
 
+const normalizePublicFlag = (item) =>
+  item?.is_public === true ||
+  item?.is_public === 1 ||
+  item?.is_public === "true" ||
+  item?.is_public === "1" ||
+  item?.isPublic === true ||
+  item?.isPublic === 1 ||
+  item?.isPublic === "true" ||
+  item?.isPublic === "1";
+
 /**
  * Normalize team data to ensure consistent property names
  */
@@ -32,9 +42,19 @@ const normalizeTeamData = (team) => {
     normalizedTeam.teamavatar_url = team.teamavatarUrl;
   }
 
-  normalizedTeam.is_public = team.is_public === true;
+  normalizedTeam.is_public = normalizePublicFlag(team);
+  normalizedTeam.isPublic = normalizedTeam.is_public;
 
   return normalizedTeam;
+};
+
+const normalizeUserData = (user) => {
+  if (!user) return user;
+
+  const normalizedUser = { ...user };
+  normalizedUser.is_public = normalizePublicFlag(user);
+  normalizedUser.isPublic = normalizedUser.is_public;
+  return normalizedUser;
 };
 
 const VALID_SEARCH_TYPES = new Set(["all", "teams", "users", "roles"]);
@@ -53,7 +73,9 @@ const normalizeSearchResponse = (payload = {}) => {
       teams: Array.isArray(data.teams)
         ? data.teams.map(normalizeTeamData)
         : [],
-      users: data.users ?? [],
+      users: Array.isArray(data.users)
+        ? data.users.map(normalizeUserData)
+        : [],
       roles: data.roles ?? [],
     },
     pagination: {

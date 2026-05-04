@@ -84,7 +84,7 @@ const Card = ({
       >
         <div className="avatar placeholder relative">
           <div
-            className={`${shapeClass} ${sizeClass} relative flex items-center justify-center overflow-hidden ${imageReplacement ? "" : "bg-primary text-primary-content"}`}
+            className={`${shapeClass} ${sizeClass} relative flex items-center justify-center overflow-hidden ${imageReplacement ? "" : "bg-[var(--color-primary-focus)] text-primary-content"}`}
           >
             {imageReplacement ? (
               imageReplacement
@@ -208,7 +208,7 @@ const Card = ({
       >
         {(image || imageFallback || imageReplacement) && (
           <div className="avatar placeholder flex-shrink-0 relative">
-            <div className={`rounded-full w-9 h-9 relative flex items-center justify-center overflow-hidden ${imageReplacement ? "" : "bg-primary text-primary-content"}`}>
+            <div className={`rounded-full w-9 h-9 relative flex items-center justify-center overflow-hidden ${imageReplacement ? "" : "bg-[var(--color-primary-focus)] text-primary-content"}`}>
               {imageReplacement ? (
                 imageReplacement
               ) : typeof image === "string" &&
@@ -238,7 +238,7 @@ const Card = ({
 
         <div className="min-w-0 flex-1">
           <Tooltip content={title} wrapperClassName="block min-w-0 overflow-hidden">
-            <div className="font-medium text-sm text-primary truncate">{title}</div>
+            <div className="font-medium text-sm text-[var(--color-primary-focus)] truncate">{title}</div>
           </Tooltip>
           {subtitle && (
             <div className="text-xs text-base-content/60 mt-px">{subtitle}</div>
@@ -334,7 +334,7 @@ const Card = ({
 
               <div className="min-w-0 flex-1">
                 <h3
-                  className={`font-medium text-primary leading-[120%] mb-1 ${titleClassName || "text-lg"}`}
+                  className={`font-medium text-[var(--color-primary-focus)] leading-[120%] mb-1 ${titleClassName || "text-lg"}`}
                 >
                   {title}
                 </h3>

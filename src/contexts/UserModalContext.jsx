@@ -124,7 +124,25 @@ export const UserModalProvider = ({ children }) => {
 const UserModalStack = ({ stack, onClose, onOpenUser }) => {
   return (
     <>
-      {stack.map(({ userId, roleMatchTagIds, roleMatchBadgeNames, roleMatchName, roleMatchMaxDistanceKm, showMatchHighlights, matchScore, matchType, matchDetails, distanceKm, filledRoleName, teamName, invitationPrefillTeamId, invitationPrefillRoleId, invitationPrefillTeamName, invitationPrefillRoleName }, idx) => {
+      {stack.map(({
+        userId,
+        roleMatchTagIds,
+        roleMatchBadgeNames,
+        roleMatchName,
+        roleMatchMaxDistanceKm,
+        isFromSearch,
+        showMatchHighlights,
+        matchScore,
+        matchType,
+        matchDetails,
+        distanceKm,
+        filledRoleName,
+        teamName,
+        invitationPrefillTeamId,
+        invitationPrefillRoleId,
+        invitationPrefillTeamName,
+        invitationPrefillRoleName,
+      }, idx) => {
         const zIndex = BASE_Z_INDEX + idx * MODAL_Z_STEP;
         const isTop = idx === stack.length - 1;
 
@@ -151,6 +169,7 @@ const UserModalStack = ({ stack, onClose, onOpenUser }) => {
               roleMatchBadgeNames={roleMatchBadgeNames}
               roleMatchName={roleMatchName}
               roleMatchMaxDistanceKm={roleMatchMaxDistanceKm}
+              isFromSearch={isFromSearch}
               showMatchHighlights={showMatchHighlights}
               matchScore={matchScore}
               matchType={matchType}

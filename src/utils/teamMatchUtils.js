@@ -6,6 +6,8 @@ const normalizeText = (value) =>
   typeof value === "string" ? value.trim().toLowerCase() : "";
 
 const toFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
@@ -224,6 +226,39 @@ const mergeMatchDetails = (computedMatchDetails, existingMatchDetails) => {
   };
 };
 
+const mergeMatchDetailsPreservingExistingScores = (
+  computedMatchDetails,
+  existingMatchDetails,
+) => {
+  const existing = existingMatchDetails ?? {};
+  const computed = computedMatchDetails ?? {};
+
+  return {
+    ...computed,
+    ...existing,
+    tagScore:
+      getDetailValue(existing, "tagScore", "tag_score") ?? computed.tagScore,
+    badgeScore:
+      getDetailValue(existing, "badgeScore", "badge_score") ??
+      computed.badgeScore,
+    distanceScore:
+      getDetailValue(existing, "distanceScore", "distance_score") ??
+      computed.distanceScore,
+    sharedTagCount:
+      getDetailValue(existing, "sharedTagCount", "shared_tag_count") ??
+      computed.sharedTagCount,
+    sharedBadgeCount:
+      getDetailValue(existing, "sharedBadgeCount", "shared_badge_count") ??
+      computed.sharedBadgeCount,
+    totalTagCount:
+      getDetailValue(existing, "totalTagCount", "total_tag_count") ??
+      computed.totalTagCount,
+    totalBadgeCount:
+      getDetailValue(existing, "totalBadgeCount", "total_badge_count") ??
+      computed.totalBadgeCount,
+  };
+};
+
 const calculateWeightedOverallScore = ({
   tagScore = null,
   badgeScore = null,
@@ -251,17 +286,20 @@ const getOverallScoreFromMatchDetails = (matchDetails) =>
     ),
   });
 
-export const getResultMatchScore = (item) => {
+const getExplicitMatchScore = (item) => {
   const raw =
     item?.bestMatchScore ??
     item?.best_match_score ??
     item?.matchScore ??
-    item?.match_score ??
-    0;
+    item?.match_score;
+
+  if (raw == null || raw === "") return null;
 
   const score = Number(raw);
-  return Number.isFinite(score) ? score : 0;
+  return Number.isFinite(score) ? score : null;
 };
+
+export const getResultMatchScore = (item) => getExplicitMatchScore(item) ?? 0;
 
 export const buildViewerTeamMatchProfile = ({
   user = null,
@@ -452,7 +490,7 @@ export const enrichTeamMatchData = ({
   const computed = calculateTeamMatchData({ team, viewerProfile, teamBadges });
   if (!computed) return team;
 
-  const existingScore = getResultMatchScore(team);
+  const existingScore = getExplicitMatchScore(team);
   const existingMatchType = team.matchType ?? team.match_type ?? null;
   const existingMatchDetails = team.matchDetails ?? team.match_details ?? null;
   const mergedMatchDetails = mergeMatchDetails(
@@ -464,7 +502,8 @@ export const enrichTeamMatchData = ({
   const finalScore =
     computedOverallScore ??
     computed.bestMatchScore ??
-    (existingScore > 0 ? existingScore : null);
+    existingScore ??
+    null;
   const finalMatchType = existingMatchType ?? computed.matchType;
   const finalMatchDetails = mergedMatchDetails;
   const finalSharedTagCount =
@@ -495,7 +534,7 @@ export const enrichUserMatchData = ({
   });
   if (!computed) return user;
 
-  const existingScore = getResultMatchScore(user);
+  const existingScore = getExplicitMatchScore(user);
   const existingMatchType = user.matchType ?? user.match_type ?? null;
   const existingMatchDetails = user.matchDetails ?? user.match_details ?? null;
   const mergedMatchDetails = mergeMatchDetails(
@@ -506,7 +545,8 @@ export const enrichUserMatchData = ({
   const finalScore =
     computedOverallScore ??
     computed.bestMatchScore ??
-    (existingScore > 0 ? existingScore : null);
+    existingScore ??
+    null;
   const finalMatchType = existingMatchType ?? computed.matchType;
   const finalSharedTagCount =
     user.sharedTagCount ??
@@ -537,7 +577,7 @@ export const enrichUserRoleMatchData = ({
 } = {}) => {
   if (!user) return user;
 
-  const existingScore = getResultMatchScore(user);
+  const existingScore = getExplicitMatchScore(user);
   const existingMatchDetails = user.matchDetails ?? user.match_details ?? null;
   const computed = calculateUserRoleMatchData({
     matchedUser: user,
@@ -548,15 +588,19 @@ export const enrichUserRoleMatchData = ({
 
   if (!computed) return user;
 
-  const mergedMatchDetails = mergeMatchDetails(
-    computed.matchDetails,
-    existingMatchDetails,
-  );
+  const mergedMatchDetails =
+    existingScore != null && existingMatchDetails
+      ? mergeMatchDetailsPreservingExistingScores(
+          computed.matchDetails,
+          existingMatchDetails,
+        )
+      : mergeMatchDetails(computed.matchDetails, existingMatchDetails);
   const computedOverallScore = getOverallScoreFromMatchDetails(mergedMatchDetails);
   const finalScore =
-    existingScore > 0
-      ? existingScore
-      : computedOverallScore ?? computed.bestMatchScore ?? existingScore;
+    existingScore ??
+    computedOverallScore ??
+    computed.bestMatchScore ??
+    0;
   const finalSharedTagCount =
     user.sharedTagCount ??
     user.shared_tag_count ??

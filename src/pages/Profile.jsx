@@ -951,7 +951,7 @@ const Profile = () => {
               {/* Avatar */}
               <div className="mb-4 md:mb-0 md:mr-8 flex-shrink-0">
                 <div className="avatar placeholder">
-                  <div className="bg-primary text-primary-content rounded-full w-32 h-32 relative overflow-hidden">
+                  <div className="bg-[var(--color-primary-focus)] text-primary-content rounded-full w-32 h-32 relative overflow-hidden">
                     {(user.avatarUrl || user.avatar_url) && !imageError ? (
                       <img
                         src={user.avatarUrl || user.avatar_url}

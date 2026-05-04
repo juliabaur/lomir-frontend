@@ -415,7 +415,7 @@ const TeamInvitationDetailsModal = ({
 
                 {/* Fallback initials */}
                 <div
-                  className="avatar-fallback bg-primary text-primary-content flex items-center justify-center w-full h-full rounded-full absolute inset-0"
+                  className="avatar-fallback bg-[var(--color-primary-focus)] text-primary-content flex items-center justify-center w-full h-full rounded-full absolute inset-0"
                   style={{ display: getTeamAvatar() ? "none" : "flex" }}
                 >
                   <span className="text-lg font-medium">

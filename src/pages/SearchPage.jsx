@@ -14,6 +14,7 @@ import Grid from "../components/layout/Grid";
 import TeamCard from "../components/teams/TeamCard";
 import VacantRoleCard from "../components/teams/VacantRoleCard";
 import UserCard from "../components/users/UserCard";
+import SearchMapView from "../components/search/SearchMapView";
 import Pagination from "../components/common/Pagination";
 import BooleanSearchInput from "../components/BooleanSearchInput";
 import Tooltip from "../components/common/Tooltip";
@@ -22,13 +23,16 @@ import {
   UserSearch,
   Users2,
   Clock,
+  Filter,
   FlaskConical,
   Sparkles,
   ArrowDownAZ,
   ArrowUpZA,
+  RotateCcw,
   SlidersHorizontal,
   UserPlus,
   UserMinus,
+  Ruler,
   MapPin,
   Globe,
   Target,
@@ -50,13 +54,165 @@ import {
   getActiveCriteriaPills,
   getSortOptionDisplay,
   getVisibleSortOptions,
+  shouldUseMergedResultPagination,
 } from "./searchPageHelpers";
 
 import {
   RESULTS_PER_PAGE_OPTIONS,
   DEFAULT_RESULTS_PER_PAGE,
 } from "../constants/pagination";
-import { calculateDistanceKm } from "../utils/locationUtils";
+import {
+  calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
+} from "../utils/locationUtils";
+
+const DISTANCE_UNAVAILABLE_SENTINEL_KM = 999999;
+const RESULT_TYPE_TIE_BREAKER_ORDER = {
+  team: 0,
+  user: 1,
+  role: 2,
+};
+const SORTING_OPTION_VALUES = new Set([
+  "name",
+  "recent",
+  "newest",
+  "match",
+  "locationPriority",
+]);
+
+const getFilterableDistanceKm = (item) => {
+  const matchDetails = item?.matchDetails ?? item?.match_details ?? null;
+  const rawDistance =
+    item?.distanceKm ??
+    item?.distance_km ??
+    matchDetails?.distanceKm ??
+    matchDetails?.distance_km;
+  const distance =
+    rawDistance !== null && rawDistance !== undefined && rawDistance !== ""
+      ? Number(rawDistance)
+      : null;
+
+  return Number.isFinite(distance) &&
+    distance < DISTANCE_UNAVAILABLE_SENTINEL_KM
+    ? distance
+    : null;
+};
+
+const getProximitySortValue = (item) =>
+  getFilterableDistanceKm(item) ?? DISTANCE_UNAVAILABLE_SENTINEL_KM;
+
+const getUserDisplayName = (u) =>
+  (
+    (u?.first_name || u?.firstName || "") +
+    " " +
+    (u?.last_name || u?.lastName || "")
+  ).trim().toLowerCase() || (u?.username || "").toLowerCase();
+
+const getSearchItemDisplayName = (item) => {
+  if (!item) return "";
+
+  if (item._resultType === "team") {
+    return (item.name || "").toLowerCase();
+  }
+
+  if (item._resultType === "role") {
+    return String(
+      item.roleName ??
+        item.role_name ??
+        item.name ??
+        item.teamName ??
+        item.team_name ??
+        "",
+    ).toLowerCase();
+  }
+
+  return getUserDisplayName(item);
+};
+
+const getSearchItemActivityTime = (item) => {
+  if (!item) return 0;
+
+  const value =
+    item._resultType === "role"
+      ? item.updatedAt ?? item.updated_at ?? item.createdAt ?? item.created_at
+      : item.last_active_at ??
+        item.lastActiveAt ??
+        item.last_active ??
+        item.lastActive ??
+        item.updated_at ??
+        item.updatedAt ??
+        item.created_at ??
+        item.createdAt;
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const compareSearchItemTieBreakers = (a, b) => {
+  const groupIndexCompare =
+    (a?._resultGroupIndex ?? Number.MAX_SAFE_INTEGER) -
+    (b?._resultGroupIndex ?? Number.MAX_SAFE_INTEGER);
+
+  if (groupIndexCompare !== 0) return groupIndexCompare;
+
+  const resultTypeCompare =
+    (RESULT_TYPE_TIE_BREAKER_ORDER[a?._resultType] ??
+      Number.MAX_SAFE_INTEGER) -
+    (RESULT_TYPE_TIE_BREAKER_ORDER[b?._resultType] ??
+      Number.MAX_SAFE_INTEGER);
+
+  if (resultTypeCompare !== 0) return resultTypeCompare;
+
+  const activityCompare =
+    getSearchItemActivityTime(b) - getSearchItemActivityTime(a);
+
+  if (activityCompare !== 0) return activityCompare;
+
+  const nameCompare = getSearchItemDisplayName(a).localeCompare(
+    getSearchItemDisplayName(b),
+  );
+
+  if (nameCompare !== 0) return nameCompare;
+
+  return `${a?._resultType ?? ""}-${a?.id ?? ""}`.localeCompare(
+    `${b?._resultType ?? ""}-${b?.id ?? ""}`,
+  );
+};
+
+const isTruthyRemoteFlag = (value) =>
+  value === true || value === 1 || value === "true" || value === "1";
+
+const isRemoteSearchItem = (item) =>
+  isTruthyRemoteFlag(item?.is_remote) ||
+  isTruthyRemoteFlag(item?.isRemote) ||
+  isTruthyRemoteFlag(item?.role?.is_remote) ||
+  isTruthyRemoteFlag(item?.role?.isRemote);
+
+const getNearestSortPriority = (item) => {
+  if (isRemoteSearchItem(item)) return 2;
+  return getFilterableDistanceKm(item) === null ? 1 : 0;
+};
+
+const compareProximityItems = (a, b, sortDir) => {
+  const remoteCompare =
+    sortDir === "remote"
+      ? Number(isRemoteSearchItem(b)) - Number(isRemoteSearchItem(a))
+      : getNearestSortPriority(a) - getNearestSortPriority(b);
+
+  if (remoteCompare !== 0) return remoteCompare;
+
+  const aDist = getProximitySortValue(a);
+  const bDist = getProximitySortValue(b);
+  const distanceCompare =
+    sortDir === "remote" ? bDist - aDist : aDist - bDist;
+
+  return distanceCompare !== 0
+    ? distanceCompare
+    : compareSearchItemTieBreakers(a, b);
+};
+
+const sortByProximity = (items, sortDir) =>
+  [...items].sort((a, b) => compareProximityItems(a, b, sortDir));
 
 const SearchPage = () => {
   const location = useLocation();
@@ -106,6 +262,7 @@ const SearchPage = () => {
     return "asc";
   });
   const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [showFilterOptions, setShowFilterOptions] = useState(false);
   const [openSubmenuKey, setOpenSubmenuKey] = useState(null);
   const sortFilterRef = useRef(null);
   const portalContainerRef = useRef(null);
@@ -129,7 +286,7 @@ const SearchPage = () => {
   const [capacityMode, setCapacityMode] = useState("spots");
 
   // ===== RESULT VIEW STATE =====
-  const [resultView, setResultView] = useState("card");
+  const [resultView, setResultView] = useState("map");
 
   // ===== ROLE MATCH CONTEXT STATE =====
   const [matchRoleId, setMatchRoleId] = useState(() => {
@@ -205,26 +362,58 @@ const SearchPage = () => {
 
     const matchType = item.matchType ?? item.match_type ?? null;
     const matchDetails = item.matchDetails ?? item.match_details ?? null;
-    const roleDistance = Number(
-      matchDetails?.distanceKm ?? matchDetails?.distance_km,
-    );
-    const rawDistance = Number(item.distance_km ?? item.distanceKm);
+    const rawRoleDistance =
+      matchDetails?.distanceKm ?? matchDetails?.distance_km;
+    const roleDistance =
+      rawRoleDistance !== null &&
+      rawRoleDistance !== undefined &&
+      rawRoleDistance !== ""
+        ? Number(rawRoleDistance)
+        : null;
+    const rawDistanceValue = item.distanceKm ?? item.distance_km;
+    const rawDistance =
+      rawDistanceValue !== null &&
+      rawDistanceValue !== undefined &&
+      rawDistanceValue !== ""
+        ? Number(rawDistanceValue)
+        : null;
     const computedDistance = viewerEntity
       ? calculateDistanceKm(viewerEntity, item)
       : null;
+    const rawZeroLooksWrong =
+      Number.isFinite(rawDistance) &&
+      rawDistance <= 0.5 &&
+      viewerEntity &&
+      locationsHaveDifferentKnownParts(viewerEntity, item);
 
     let resolvedDistance = null;
 
     if (
       matchType === "role_match" &&
       Number.isFinite(roleDistance) &&
-      roleDistance < 999999
+      roleDistance < DISTANCE_UNAVAILABLE_SENTINEL_KM
     ) {
       resolvedDistance = roleDistance;
+    } else if (
+      Number.isFinite(rawDistance) &&
+      rawDistance < DISTANCE_UNAVAILABLE_SENTINEL_KM
+    ) {
+      resolvedDistance =
+        rawZeroLooksWrong && computedDistance != null
+          ? computedDistance
+          : rawZeroLooksWrong
+            ? null
+            : rawDistance;
     } else if (computedDistance != null) {
       resolvedDistance = computedDistance;
-    } else if (Number.isFinite(rawDistance) && rawDistance < 999999) {
-      resolvedDistance = rawDistance;
+    }
+
+    if (resolvedDistance == null && rawZeroLooksWrong) {
+      return {
+        ...item,
+        distance_km: null,
+        distanceKm: null,
+      };
     }
 
     if (resolvedDistance == null) {
@@ -288,20 +477,27 @@ const SearchPage = () => {
       authOnly: true,
     },
     {
-      value: "proximity",
+      value: "locationPriority",
+      sortValue: "proximity",
       defaultDir: "asc",
-      labelAsc: "Nearest",
-      labelDesc: "Farthest",
-      labelRemote: "Remote",
-      shortLabelAsc: "Near",
-      shortLabelDesc: "Far",
-      shortLabelRemote: "Remote",
-      tooltipAsc: "Show the nearest results first",
-      tooltipDesc: "Show the farthest results first",
+      labelAsc: "Nearest First",
+      labelRemote: "Remote First",
+      shortLabelAsc: "Near 1st",
+      shortLabelRemote: "Remote 1st",
+      tooltipAsc: "Keep nearby results ahead of remote-friendly results",
       tooltipRemote: "Show remote-friendly results first",
       iconAsc: MapPin,
-      iconDesc: MapPin,
       iconRemote: Globe,
+      requiresCoordinates: true,
+    },
+    {
+      value: "proximity",
+      defaultDir: "asc",
+      filterOnly: true,
+      labelAsc: "Distance",
+      shortLabelAsc: "Distance",
+      tooltipAsc: "Filter results by distance from your location",
+      iconAsc: Ruler,
     },
     {
       value: "capacity",
@@ -340,53 +536,55 @@ const SearchPage = () => {
   );
 
   const effectiveSearchResults = useMemo(() => {
-    if (!viewerTeamMatchProfile?.user) {
-      return searchResults;
-    }
+    const shouldResolveDistance = Boolean(viewerDistanceSource);
+    const shouldEnrichMatches =
+      sortBy === "match" && Boolean(viewerTeamMatchProfile?.user);
 
     return {
       ...searchResults,
       users: Array.isArray(searchResults.users)
         ? searchResults.users.map((matchedUser) => {
+            const distanceResolvedUser = shouldResolveDistance
+              ? withResolvedDistance(matchedUser, viewerDistanceSource)
+              : matchedUser;
             const enrichedUser =
-              sortBy === "match"
+              shouldEnrichMatches
                 ? matchRoleId
                   ? enrichUserRoleMatchData({
-                      user: matchedUser,
+                      user: distanceResolvedUser,
                       requiredTagIds: roleMatchTagIds,
                       requiredBadgeNames: roleMatchBadgeNames,
                     })
                   : enrichUserMatchData({
-                      user: matchedUser,
+                      user: distanceResolvedUser,
                       viewerProfile: viewerTeamMatchProfile,
                     })
-                : matchedUser;
+                : distanceResolvedUser;
 
-            return withResolvedDistance(
-              enrichedUser,
-              viewerDistanceSource,
-            );
+            return enrichedUser;
           })
         : searchResults.users,
       teams: Array.isArray(searchResults.teams)
         ? searchResults.teams.map((team) => {
+            const distanceResolvedTeam = shouldResolveDistance
+              ? withResolvedDistance(team, viewerDistanceSource)
+              : team;
             const enrichedTeam =
-              sortBy === "match"
+              shouldEnrichMatches
                 ? enrichTeamMatchData({
-                    team,
+                    team: distanceResolvedTeam,
                     viewerProfile: viewerTeamMatchProfile,
                   })
-                : team;
+                : distanceResolvedTeam;
 
-            return withResolvedDistance(
-              enrichedTeam,
-              viewerDistanceSource,
-            );
+            return enrichedTeam;
           })
         : searchResults.teams,
       roles: Array.isArray(searchResults.roles)
         ? searchResults.roles.map((role) =>
-            withResolvedDistance(role, viewerDistanceSource),
+            shouldResolveDistance
+              ? withResolvedDistance(role, viewerDistanceSource)
+              : role,
           )
         : searchResults.roles,
     };
@@ -404,22 +602,44 @@ const SearchPage = () => {
   const shouldExcludeCurrentUserFromBestMatch =
     sortBy === "match" && isAuthenticated && !!user?.id;
 
-  const displaySearchResults = useMemo(() => {
-    if (
-      !shouldExcludeCurrentUserFromBestMatch ||
-      !Array.isArray(effectiveSearchResults.users)
-    ) {
+  const distanceFilteredSearchResults = useMemo(() => {
+    const distanceLimit = Number(maxDistance);
+
+    if (!Number.isFinite(distanceLimit) || distanceLimit <= 0) {
       return effectiveSearchResults;
     }
 
+    const isWithinDistanceLimit = (item) => {
+      const distance = getFilterableDistanceKm(item);
+      return distance !== null && distance <= distanceLimit;
+    };
+    const filterItems = (items) =>
+      Array.isArray(items) ? items.filter(isWithinDistanceLimit) : items;
+
     return {
       ...effectiveSearchResults,
-      users: effectiveSearchResults.users.filter(
+      users: filterItems(effectiveSearchResults.users),
+      teams: filterItems(effectiveSearchResults.teams),
+      roles: filterItems(effectiveSearchResults.roles),
+    };
+  }, [effectiveSearchResults, maxDistance]);
+
+  const displaySearchResults = useMemo(() => {
+    if (
+      !shouldExcludeCurrentUserFromBestMatch ||
+      !Array.isArray(distanceFilteredSearchResults.users)
+    ) {
+      return distanceFilteredSearchResults;
+    }
+
+    return {
+      ...distanceFilteredSearchResults,
+      users: distanceFilteredSearchResults.users.filter(
         (matchedUser) => String(matchedUser?.id) !== String(user.id),
       ),
     };
   }, [
-    effectiveSearchResults,
+    distanceFilteredSearchResults,
     shouldExcludeCurrentUserFromBestMatch,
     user?.id,
   ]);
@@ -438,8 +658,32 @@ const SearchPage = () => {
         ? displaySearchResults.roles
         : [],
   };
-
+  const usesClientMergedPagination = shouldUseMergedResultPagination({
+    searchType,
+    sortBy,
+  });
   const effectivePagination = useMemo(() => {
+    if (usesClientMergedPagination) {
+      const totalItems =
+        (pagination.totalTeams || 0) +
+        (pagination.totalUsers || 0) +
+        (pagination.totalRoles || 0);
+      const totalPages = Math.max(
+        1,
+        Math.ceil(totalItems / Math.max(1, resultsPerPage)),
+      );
+
+      return {
+        ...pagination,
+        page: currentPage,
+        limit: resultsPerPage,
+        totalItems,
+        totalPages,
+        hasNextPage: currentPage < totalPages,
+        hasPrevPage: currentPage > 1,
+      };
+    }
+
     if (
       !shouldExcludeCurrentUserFromBestMatch ||
       searchType === "teams" ||
@@ -471,49 +715,37 @@ const SearchPage = () => {
     };
   }, [
     pagination,
+    currentPage,
     resultsPerPage,
     searchType,
     shouldExcludeCurrentUserFromBestMatch,
+    usesClientMergedPagination,
   ]);
-
-  const getUserDisplayName = (u) =>
-    (
-      (u.first_name || u.firstName || "") +
-      " " +
-      (u.last_name || u.lastName || "")
-    ).trim().toLowerCase() || (u.username || "").toLowerCase();
 
   const mergedDisplayItems = (() => {
     if (searchType !== "all") return null;
-    const teams = filteredResults.teams.map((t) => ({
+    const teams = filteredResults.teams.map((t, index) => ({
       ...t,
       _resultType: "team",
+      _resultGroupIndex: index,
     }));
-    const users = filteredResults.users.map((u) => ({
+    const users = filteredResults.users.map((u, index) => ({
       ...u,
       _resultType: "user",
+      _resultGroupIndex: index,
     }));
-    const roles = filteredResults.roles.map((r) => ({
+    const roles = filteredResults.roles.map((r, index) => ({
       ...r,
       _resultType: "role",
+      _resultGroupIndex: index,
     }));
     const combined = [...teams, ...users, ...roles];
     combined.sort((a, b) => {
-      const aIsTeam = a._resultType === "team";
-      const bIsTeam = b._resultType === "team";
       const aIsRole = a._resultType === "role";
       const bIsRole = b._resultType === "role";
       if (sortBy === "name") {
-        const aName = aIsTeam
-          ? (a.name || "").toLowerCase()
-          : aIsRole
-            ? (a.roleName ?? a.role_name ?? "").toLowerCase()
-            : getUserDisplayName(a);
-        const bName = bIsTeam
-          ? (b.name || "").toLowerCase()
-          : bIsRole
-            ? (b.roleName ?? b.role_name ?? "").toLowerCase()
-            : getUserDisplayName(b);
+        const aName = getSearchItemDisplayName(a);
+        const bName = getSearchItemDisplayName(b);
         const cmp = aName.localeCompare(bName);
         return sortDir === "asc" ? cmp : -cmp;
       }
@@ -545,9 +777,7 @@ const SearchPage = () => {
         return sortDir === "asc" ? getDate(a) - getDate(b) : getDate(b) - getDate(a);
       }
       if (sortBy === "proximity") {
-        const aDist = a.distance_km ?? a.distanceKm ?? Infinity;
-        const bDist = b.distance_km ?? b.distanceKm ?? Infinity;
-        return sortDir === "asc" ? aDist - bDist : bDist - aDist;
+        return compareProximityItems(a, b, sortDir);
       }
       if (sortBy === "match") {
         const aScore = getResultMatchScore(a);
@@ -556,7 +786,12 @@ const SearchPage = () => {
       }
       return 0;
     });
-    return combined.slice(0, resultsPerPage);
+
+    const startIndex = usesClientMergedPagination
+      ? (currentPage - 1) * resultsPerPage
+      : 0;
+
+    return combined.slice(startIndex, startIndex + resultsPerPage);
   })();
 
   const sortedUsers = (() => {
@@ -565,6 +800,9 @@ const SearchPage = () => {
       return [...users].sort(
         (a, b) => getResultMatchScore(b) - getResultMatchScore(a),
       );
+    }
+    if (sortBy === "proximity") {
+      return sortByProximity(users, sortDir);
     }
     if (sortBy !== "name") return users;
     return [...users].sort((a, b) => {
@@ -580,8 +818,16 @@ const SearchPage = () => {
         (a, b) => getResultMatchScore(b) - getResultMatchScore(a),
       );
     }
+    if (sortBy === "proximity") {
+      return sortByProximity(teams, sortDir);
+    }
     return teams;
   })();
+
+  const sortedRoles =
+    sortBy === "proximity"
+      ? sortByProximity(filteredResults.roles, sortDir)
+      : filteredResults.roles;
 
   const displayedTeams = mergedDisplayItems
     ? []
@@ -593,9 +839,24 @@ const SearchPage = () => {
     : searchType === "teams"
       ? []
       : sortedUsers.slice(0, Math.max(0, resultsPerPage - displayedTeams.length));
+  const visibleMapItems =
+    searchType === "all"
+      ? mergedDisplayItems
+      : searchType === "roles"
+        ? sortedRoles.map((role) => ({ ...role, _resultType: "role" }))
+        : [
+            ...displayedTeams.map((team) => ({ ...team, _resultType: "team" })),
+            ...displayedUsers.map((matchedUser) => ({
+              ...matchedUser,
+              _resultType: "user",
+            })),
+          ];
 
   const hasActiveFilters =
-    filterTagIds.length > 0 || filterBadgeIds.length > 0 || !!matchRoleId;
+    filterTagIds.length > 0 ||
+    filterBadgeIds.length > 0 ||
+    maxDistance !== null ||
+    !!matchRoleId;
 
   const noResultsFound =
     (hasSearched || hasActiveFilters) &&
@@ -618,8 +879,11 @@ const SearchPage = () => {
     searchType === "teams" && sortBy === "capacity" && capacityMode === "spots";
   const isCapacityRolesSort =
     searchType === "teams" && sortBy === "capacity" && capacityMode === "roles";
+  const shouldShowLocationContext =
+    sortBy === "proximity" || maxDistance !== null || sortBy === "match";
 
-  const activeSubmenuKey = showSortDropdown ? openSubmenuKey : null;
+  const activeSubmenuKey =
+    showSortDropdown && showFilterOptions ? openSubmenuKey : null;
 
   const submenuAnchorSortKey =
     activeSubmenuKey === "capacity"
@@ -633,6 +897,12 @@ const SearchPage = () => {
     userHasCoordinates,
     isAuthenticated,
   });
+  const visibleSortingOptions = visibleSortOptions.filter((option) =>
+    SORTING_OPTION_VALUES.has(option.value),
+  );
+  const visibleFilterOptions = visibleSortOptions.filter(
+    (option) => !SORTING_OPTION_VALUES.has(option.value),
+  );
 
   const fetchData = useCallback(
     async (criteria) => {
@@ -847,6 +1117,12 @@ const SearchPage = () => {
   useEffect(() => {
     if (!showSortDropdown) {
       setOpenSubmenuKey(null);
+      setShowFilterOptions(false);
+      return;
+    }
+
+    if (!showFilterOptions) {
+      setOpenSubmenuKey(null);
       return;
     }
 
@@ -857,7 +1133,20 @@ const SearchPage = () => {
     if (openSubmenuKey === DISTANCE_SUBMENU_TYPE && !userHasCoordinates) {
       setOpenSubmenuKey(null);
     }
-  }, [showSortDropdown, openSubmenuKey, searchType, userHasCoordinates]);
+  }, [
+    showSortDropdown,
+    showFilterOptions,
+    openSubmenuKey,
+    searchType,
+    userHasCoordinates,
+  ]);
+
+  useEffect(() => {
+    if (sortBy === "proximity" && sortDir === "desc") {
+      setSortDir("asc");
+      setCurrentPage(1);
+    }
+  }, [sortBy, sortDir]);
 
   useLayoutEffect(() => {
     if (!activeSubmenuKey || !showSortDropdown) {
@@ -1010,6 +1299,13 @@ const SearchPage = () => {
     setShowSortDropdown((prev) => !prev);
   };
 
+  const handleFilterOptionsToggle = () => {
+    if (showFilterOptions) {
+      setOpenSubmenuKey(null);
+    }
+    setShowFilterOptions((prev) => !prev);
+  };
+
   const resetSortToDefault = () => {
     setSortBy("name");
     setSortDir("asc");
@@ -1017,18 +1313,26 @@ const SearchPage = () => {
     setOpenSubmenuKey(null);
   };
 
+  const handleResetSortFilters = () => {
+    setSortBy("name");
+    setSortDir("asc");
+    setMaxDistance(null);
+    setCustomDistanceInput("");
+    setCapacityMode("spots");
+    setOpenRolesOnly(false);
+    setIncludeOwnTeams(true);
+    setIncludeDemoData(true);
+    setOpenSubmenuKey(null);
+    setShowFilterOptions(false);
+    setCurrentPage(1);
+  };
+
   const handleSortChange = (newSortBy) => {
     let newSortDir = sortDir;
 
     if (newSortBy === sortBy) {
       if (newSortBy === "proximity") {
-        if (sortDir === "asc") {
-          newSortDir = "desc";
-        } else if (sortDir === "desc") {
-          newSortDir = "remote";
-        } else {
-          newSortDir = "asc";
-        }
+        newSortDir = "asc";
       } else if (newSortBy === "capacity") {
         newSortDir = sortDir === "desc" ? "asc" : "desc";
       } else if (newSortBy === "match") {
@@ -1055,13 +1359,20 @@ const SearchPage = () => {
       }
     }
 
-    if (newSortBy === "proximity" && newSortDir === "remote") {
-      setSearchType("teams");
-      setMaxDistance(null);
-      setCustomDistanceInput("");
-    }
-
     setSortBy(newSortBy);
+    setSortDir(newSortDir);
+    setCurrentPage(1);
+  };
+
+  const handleLocationPriorityToggle = () => {
+    const newSortDir =
+      sortBy !== "proximity"
+        ? "asc"
+        : sortDir === "remote"
+          ? "asc"
+          : "remote";
+
+    setSortBy("proximity");
     setSortDir(newSortDir);
     setCurrentPage(1);
   };
@@ -1073,8 +1384,13 @@ const SearchPage = () => {
       return;
     }
 
+    if (optionValue === "locationPriority") {
+      handleLocationPriorityToggle();
+      setOpenSubmenuKey(null);
+      return;
+    }
+
     if (optionValue === "proximity") {
-      handleSortChange("proximity");
       setOpenSubmenuKey(DISTANCE_SUBMENU_TYPE);
       return;
     }
@@ -1154,9 +1470,6 @@ const SearchPage = () => {
       setSortDir("asc");
     }
 
-    if (type !== "teams" && sortBy === "proximity" && sortDir === "remote") {
-      setSortDir("asc");
-    }
   };
 
   const handleOpenRolesOnlyToggle = () => {
@@ -1337,16 +1650,92 @@ const SearchPage = () => {
     (sortBy === "capacity" && capacityMode !== "spots") ||
     (customDistanceInput && customDistanceInput.trim() !== "");
 
+  const isFilterOptionsActive =
+    showFilterOptions ||
+    maxDistance !== null ||
+    sortBy === "capacity" ||
+    effectiveOpenRolesOnly ||
+    !effectiveIncludeOwnTeams ||
+    !includeDemoData ||
+    (customDistanceInput && customDistanceInput.trim() !== "");
+
   const sortIconColor = isSortModified
     ? "var(--color-primary)"
     : "var(--color-primary-focus)";
   const IncludeOwnTeamsIcon = Users2;
 
+  const renderToolbarOption = (option) => {
+    const { isActive, IconComponent, label, shortLabel, tooltip } =
+      getSortOptionDisplay({
+        option,
+        sortBy,
+        sortDir,
+        isCapacitySpotsSort,
+        maxDistance,
+      });
+    const optionButton = (
+      <button
+        ref={(node) => {
+          sortButtonRefs.current[option.value] = node;
+        }}
+        type="button"
+        onClick={() => handleTopLevelSortOptionClick(option.value)}
+        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+          isActive
+            ? "text-[var(--color-primary)] font-bold"
+            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+        }`}
+        disabled={loading}
+        aria-label={tooltip ? `${label} - ${tooltip}` : label}
+      >
+        <IconComponent className="w-3.5 h-3.5 shrink-0" />
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{shortLabel}</span>
+      </button>
+    );
+
+    return tooltip ? (
+      <Tooltip
+        key={option.value}
+        content={tooltip}
+        wrapperClassName="inline-flex items-center shrink-0"
+      >
+        {optionButton}
+      </Tooltip>
+    ) : (
+      <React.Fragment key={option.value}>{optionButton}</React.Fragment>
+    );
+  };
+
+  const renderFilterOptionsToggle = () => (
+    <Tooltip
+      content={
+        showFilterOptions ? "Hide filter controls" : "Show filter controls"
+      }
+      wrapperClassName="inline-flex items-center shrink-0"
+    >
+      <button
+        type="button"
+        onClick={handleFilterOptionsToggle}
+        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+          isFilterOptionsActive
+            ? "text-[var(--color-primary)] font-bold"
+            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+        }`}
+        disabled={loading}
+        aria-label={
+          showFilterOptions ? "Hide filter controls" : "Show filter controls"
+        }
+      >
+        <Filter className="w-3.5 h-3.5 shrink-0" />
+        <span className="hidden sm:inline">{showFilterOptions ? "Hide Filters" : "Show Filters ..."}</span>
+        <span className="sm:hidden">{showFilterOptions ? "Hide Filters" : "Filters ..."}</span>
+      </button>
+    </Tooltip>
+  );
+
   const renderSortSubmenuPortal = () => {
     if (!activeSubmenuKey || !submenuPosition) return null;
-    if (activeSubmenuKey === DISTANCE_SUBMENU_TYPE && sortDir === "remote") {
-      return null;
-    }
 
     const submenuContent = (
       <div ref={submenuRef}>
@@ -1531,7 +1920,7 @@ const SearchPage = () => {
   };
   return (
     <PageContainer
-      title="Search teams or users"
+      title="Search teams, people or open roles"
       titleAlignment="center"
       variant="muted"
     >
@@ -1597,14 +1986,29 @@ const SearchPage = () => {
         >
           <div className="mx-auto w-full max-w-full sm:w-fit">
             <div className="flex w-full max-w-full items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSortDropdownToggle}
-                className="shrink-0 rounded-lg p-2 transition-colors"
-                title="Sort options"
+              <Tooltip
+                content={
+                  showSortDropdown
+                    ? "Hide Filtering & Sorting Options"
+                    : "Show Filtering & Sorting Options"
+                }
               >
-                <SlidersHorizontal className="w-5 h-5" color={sortIconColor} />
-              </button>
+                <button
+                  type="button"
+                  onClick={handleSortDropdownToggle}
+                  className="shrink-0 rounded-lg p-2 transition-colors"
+                  aria-label={
+                    showSortDropdown
+                      ? "Hide Filtering & Sorting Options"
+                      : "Show Filtering & Sorting Options"
+                  }
+                >
+                  <SlidersHorizontal
+                    className="w-5 h-5"
+                    color={sortIconColor}
+                  />
+                </button>
+              </Tooltip>
 
               <div className="min-w-0 flex-1 sm:w-auto sm:flex-none sm:max-w-full">
                 <BooleanSearchInput
@@ -1626,6 +2030,25 @@ const SearchPage = () => {
                   onSelectTagSuggestion={handleAddTagFilter}
                   onSelectBadgeSuggestion={handleAddBadgeFilter}
                   onSearchSuggestions={handleSearchSuggestions}
+                  leftAdornment={
+                    isSortModified ? (
+                      <div className="transition-all duration-200 opacity-100 scale-100">
+                        <Tooltip content="Reset sorting and filters">
+                          <button
+                            type="button"
+                            onClick={handleResetSortFilters}
+                            className="shrink-0 rounded-lg p-0.5 transition-colors"
+                            aria-label="Reset sorting and filters"
+                          >
+                            <RotateCcw
+                              className="w-3.5 h-3.5"
+                              color="var(--color-primary-focus)"
+                            />
+                          </button>
+                        </Tooltip>
+                      </div>
+                    ) : null
+                  }
                   className="min-w-0 w-full sm:w-auto sm:max-w-full"
                 />
               </div>
@@ -1633,146 +2056,113 @@ const SearchPage = () => {
 
             {showSortDropdown && (
               <div className="mt-2 py-1 pl-11">
-                <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
-                  <div
-                    role="group"
-                    aria-label="Sort options"
-                    className="contents"
-                  >
-                    {visibleSortOptions.map((option) => {
-                      const {
-                        isActive,
-                        IconComponent,
-                        label,
-                        shortLabel,
-                        tooltip,
-                      } =
-                        getSortOptionDisplay({
-                          option,
-                          sortBy,
-                          sortDir,
-                          isCapacitySpotsSort,
-                        });
-                      const optionButton = (
-                        <button
-                          ref={(node) => {
-                            sortButtonRefs.current[option.value] = node;
-                          }}
-                          type="button"
-                          onClick={() =>
-                            handleTopLevelSortOptionClick(option.value)
-                          }
-                          className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                            isActive
-                              ? "text-[var(--color-primary)] font-bold"
-                              : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                          }`}
-                          disabled={loading}
-                          aria-label={tooltip ? `${label} - ${tooltip}` : label}
-                        >
-                          <IconComponent className="w-3.5 h-3.5 shrink-0" />
-                          <span className="hidden sm:inline">{label}</span>
-                          <span className="sm:hidden">{shortLabel}</span>
-                        </button>
-                      );
-
-                      return tooltip ? (
-                        <Tooltip
-                          key={option.value}
-                          content={tooltip}
-                          wrapperClassName="inline-flex items-center shrink-0"
-                        >
-                          {optionButton}
-                        </Tooltip>
-                      ) : (
-                        <React.Fragment key={option.value}>
-                          {optionButton}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-
-                  {showIncludeOwnTeamsFilter && (
+                <div className="space-y-[6px]">
+                  <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
                     <div
                       role="group"
-                      aria-label="Search filters"
+                      aria-label="Sort options"
                       className="contents"
                     >
-                      <Tooltip
-                        content={
-                          effectiveIncludeOwnTeams
-                            ? "Include My Teams"
-                            : "Exclude My Teams"
-                        }
-                        wrapperClassName="inline-flex items-center shrink-0"
+                      {visibleSortingOptions.map(renderToolbarOption)}
+                    </div>
+
+                    {!showFilterOptions && renderFilterOptionsToggle()}
+                  </div>
+
+                  {showFilterOptions && (
+                    <div className="flex flex-row flex-wrap items-start gap-x-3 gap-y-[6px]">
+                      {renderFilterOptionsToggle()}
+                      <div
+                        role="group"
+                        aria-label="Filter options"
+                        className="contents"
                       >
-                        <button
-                          type="button"
-                          onClick={handleIncludeOwnTeamsToggle}
-                          className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                            !effectiveIncludeOwnTeams
-                              ? "text-[var(--color-primary)] font-bold"
-                              : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                          }`}
-                          disabled={loading}
-                          aria-label={
-                            effectiveIncludeOwnTeams
-                              ? "Include My Teams"
-                              : "Exclude My Teams"
-                          }
+                        {visibleFilterOptions.map(renderToolbarOption)}
+                      </div>
+
+                      {showIncludeOwnTeamsFilter && (
+                        <div
+                          role="group"
+                          aria-label="Search filters"
+                          className="contents"
                         >
-                          <IncludeOwnTeamsIcon className="w-3.5 h-3.5 shrink-0" />
-                          <span>
-                            {effectiveIncludeOwnTeams
-                              ? "+ My Teams"
-                              : "- My Teams"}
-                          </span>
-                        </button>
-                      </Tooltip>
+                          <Tooltip
+                            content={
+                              effectiveIncludeOwnTeams
+                                ? "Include My Teams"
+                                : "Exclude My Teams"
+                            }
+                            wrapperClassName="inline-flex items-center shrink-0"
+                          >
+                            <button
+                              type="button"
+                              onClick={handleIncludeOwnTeamsToggle}
+                              className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+                                !effectiveIncludeOwnTeams
+                                  ? "text-[var(--color-primary)] font-bold"
+                                  : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+                              }`}
+                              disabled={loading}
+                              aria-label={
+                                effectiveIncludeOwnTeams
+                                  ? "Include My Teams"
+                                  : "Exclude My Teams"
+                              }
+                            >
+                              <IncludeOwnTeamsIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span>
+                                {effectiveIncludeOwnTeams
+                                  ? "+ My Teams"
+                                  : "- My Teams"}
+                              </span>
+                            </button>
+                          </Tooltip>
+                        </div>
+                      )}
+
+                      <div
+                        role="group"
+                        aria-label="Demo data filter"
+                        className="contents"
+                      >
+                        <Tooltip
+                          content={
+                            includeDemoData
+                              ? "Include test/demo profiles, roles and teams"
+                              : "Show only real users, roles and teams"
+                          }
+                          wrapperClassName="inline-flex items-center shrink-0"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIncludeDemoData((prev) => !prev);
+                              setCurrentPage(1);
+                            }}
+                            className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
+                              !includeDemoData
+                                ? "text-[var(--color-primary)] font-bold"
+                                : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
+                            }`}
+                            disabled={loading}
+                            aria-label={
+                              includeDemoData
+                                ? "Include test/demo profiles, roles and teams"
+                                : "Show only real users, roles and teams"
+                            }
+                          >
+                            <FlaskConical className="w-3.5 h-3.5 shrink-0" />
+                            <span className="hidden sm:inline">
+                              {includeDemoData ? "+ Demo Data" : "- Demo Data"}
+                            </span>
+                            <span className="sm:hidden">
+                              {includeDemoData ? "+ Demo" : "- Demo"}
+                            </span>
+                          </button>
+                        </Tooltip>
+                      </div>
                     </div>
                   )}
-
-                  <div
-                    role="group"
-                    aria-label="Demo data filter"
-                    className="contents"
-                  >
-                    <Tooltip
-                      content={
-                        includeDemoData
-                          ? "Include test/demo profiles, roles and teams"
-                          : "Show only real users, roles and teams"
-                      }
-                      wrapperClassName="inline-flex items-center shrink-0"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIncludeDemoData((prev) => !prev);
-                          setCurrentPage(1);
-                        }}
-                        className={`flex items-center gap-1 px-1 text-xs rounded transition-colors shrink-0 ${
-                          !includeDemoData
-                            ? "text-[var(--color-primary)] font-bold"
-                            : "text-[var(--color-primary-focus)]/70 hover:text-[var(--color-primary-focus)] hover:font-medium"
-                        }`}
-                        disabled={loading}
-                        aria-label={
-                          includeDemoData
-                            ? "Include test/demo profiles, roles and teams"
-                            : "Show only real users, roles and teams"
-                        }
-                      >
-                        <FlaskConical className="w-3.5 h-3.5 shrink-0" />
-                        <span className="hidden sm:inline">
-                          {includeDemoData ? "+ Demo Data" : "- Demo Data"}
-                        </span>
-                        <span className="sm:hidden">
-                          {includeDemoData ? "+ Demo" : "- Demo"}
-                        </span>
-                      </button>
-                    </Tooltip>
-                  </div>
                 </div>
               </div>
             )}
@@ -1820,7 +2210,7 @@ const SearchPage = () => {
                   <span className="text-sm font-normal text-base-content/60 ml-2">
                     (
                     {searchType === "all"
-                      ? `${filteredResults.teams.length + filteredResults.users.length + filteredResults.roles.length} results`
+                      ? `${effectivePagination.totalItems} results`
                       : searchType === "teams"
                         ? `${effectivePagination.totalTeams} results`
                         : searchType === "users"
@@ -1830,9 +2220,10 @@ const SearchPage = () => {
                   </span>
                 </h2>
 
-                <div className="flex items-center text-sm font-normal text-base-content/60 gap-1">
+                <div className="flex flex-wrap items-center justify-end text-sm font-normal text-base-content/60 gap-1">
                   <button
                     type="button"
+                    aria-pressed={resultView === "card"}
                     onClick={() => setResultView("card")}
                     className={`px-2 py-1 rounded hover:text-base-content transition-colors ${
                       resultView === "card" ? "font-bold text-base-content" : ""
@@ -1843,6 +2234,7 @@ const SearchPage = () => {
                   <span className="text-base-content/30">|</span>
                   <button
                     type="button"
+                    aria-pressed={resultView === "mini"}
                     onClick={() => setResultView("mini")}
                     className={`px-2 py-1 rounded hover:text-base-content transition-colors ${
                       resultView === "mini" ? "font-bold text-base-content" : ""
@@ -1853,6 +2245,7 @@ const SearchPage = () => {
                   <span className="text-base-content/30">|</span>
                   <button
                     type="button"
+                    aria-pressed={resultView === "list"}
                     onClick={() => setResultView("list")}
                     className={`px-2 py-1 rounded hover:text-base-content transition-colors ${
                       resultView === "list" ? "font-bold text-base-content" : ""
@@ -1860,10 +2253,40 @@ const SearchPage = () => {
                   >
                     List
                   </button>
+                  <span className="text-base-content/30">|</span>
+                  <button
+                    type="button"
+                    aria-pressed={resultView === "map"}
+                    onClick={() => setResultView("map")}
+                    className={`px-2 py-1 rounded hover:text-base-content transition-colors ${
+                      resultView === "map" ? "font-bold text-base-content" : ""
+                    }`}
+                  >
+                    Map
+                  </button>
                 </div>
               </div>
 
-              {searchType !== "roles" &&
+              {resultView === "map" && (
+                <SearchMapView
+                  items={visibleMapItems}
+                  searchType={searchType}
+                  roleMatchTagIds={roleMatchTagIds}
+                  roleMatchBadgeNames={roleMatchBadgeNames}
+                  roleMatchName={matchRoleName}
+                  roleMatchMaxDistanceKm={matchRoleMaxDistanceKm}
+                  invitationPrefillTeamId={excludeTeamId}
+                  invitationPrefillRoleId={matchRoleId}
+                  invitationPrefillTeamName={excludeTeamName}
+                  invitationPrefillRoleName={matchRoleName}
+                  showMatchHighlights={sortBy === "match"}
+                  showMatchScore={sortBy === "match"}
+                  viewerLocation={viewerDistanceSource}
+                  proximityRadiusKm={maxDistance !== null ? maxDistance : null}
+                />
+              )}
+
+              {searchType !== "roles" && resultView !== "map" &&
                 (resultView === "list" ? (
                   <div className="background-opacity bg-opacity-70 shadow-soft rounded-xl divide-y divide-base-200">
                     {(mergedDisplayItems || [...displayedTeams.map((t) => ({ ...t, _resultType: "team" })), ...displayedUsers.map((u) => ({ ...u, _resultType: "user" }))]).map((item) =>
@@ -1880,9 +2303,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode="list"
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -1901,9 +2322,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView === "list" ? "list" : resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -1930,9 +2349,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode="list"
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -1956,9 +2373,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -1977,9 +2392,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView === "list" ? "list" : resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2006,9 +2419,7 @@ const SearchPage = () => {
                           showSearchResultTypeOverlay={searchType === "all"}
                           viewMode={resultView}
                           activeFilters={{
-                            showLocation:
-                              (sortBy === "proximity" && sortDir !== "remote") ||
-                              sortBy === "match",
+                            showLocation: shouldShowLocationContext,
                             showTags: sortBy === "match",
                             showBadges: sortBy === "match",
                           }}
@@ -2020,7 +2431,7 @@ const SearchPage = () => {
 
               {searchType === "roles" && resultView === "list" && (
                 <div className="background-opacity bg-opacity-70 shadow-soft rounded-xl divide-y divide-base-200">
-                  {filteredResults.roles.map((role) => (
+                  {sortedRoles.map((role) => (
                     <VacantRoleCard
                       key={`role-${role.id}`}
                       role={role}
@@ -2029,9 +2440,7 @@ const SearchPage = () => {
                       hideActions
                       viewMode="list"
                       activeFilters={{
-                        showLocation:
-                          (sortBy === "proximity" && sortDir !== "remote") ||
-                          sortBy === "match",
+                        showLocation: shouldShowLocationContext,
                         showTags: sortBy === "match",
                         showBadges: sortBy === "match",
                       }}
@@ -2044,14 +2453,14 @@ const SearchPage = () => {
                 </div>
               )}
 
-              {searchType === "roles" && resultView !== "list" && (
+              {searchType === "roles" && resultView !== "list" && resultView !== "map" && (
                 <Grid
                   cols={1}
                   md={resultView === "mini" ? 3 : 2}
                   lg={resultView === "mini" ? 4 : 3}
                   gap={resultView === "mini" ? 2 : 6}
                 >
-                  {filteredResults.roles.map((role) => (
+                  {sortedRoles.map((role) => (
                     <VacantRoleCard
                       key={`role-${role.id}`}
                       role={role}
@@ -2060,9 +2469,7 @@ const SearchPage = () => {
                       hideActions
                       viewMode={resultView}
                       activeFilters={{
-                        showLocation:
-                          (sortBy === "proximity" && sortDir !== "remote") ||
-                          sortBy === "match",
+                        showLocation: shouldShowLocationContext,
                         showTags: sortBy === "match",
                         showBadges: sortBy === "match",
                       }}

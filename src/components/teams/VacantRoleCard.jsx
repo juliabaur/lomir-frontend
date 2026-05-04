@@ -713,7 +713,7 @@ const VacantRoleCard = ({
     ? "bg-green-50 hover:bg-green-100"
     : "bg-amber-50 hover:bg-amber-100/70";
   const initialsAvatarClass = isFilled
-    ? "bg-success text-white"
+    ? "bg-[var(--color-primary-focus)] text-white"
     : "bg-amber-500 text-white";
   const isMiniView = viewMode === "mini";
   const avatarSizeClass = isMiniView ? "w-10 h-10" : "w-12 h-12";
@@ -1245,7 +1245,7 @@ const VacantRoleCard = ({
                   />
                 ) : null}
                 <div
-                  className="avatar-fallback bg-success text-white flex items-center justify-center w-full h-full rounded-full absolute inset-0"
+                  className="avatar-fallback bg-[var(--color-primary-focus)] text-white flex items-center justify-center w-full h-full rounded-full absolute inset-0"
                   style={{ display: filledUserAvatarUrl ? "none" : "flex" }}
                 >
                   <span className={`${avatarTextClass} font-medium`}>
@@ -1293,7 +1293,7 @@ const VacantRoleCard = ({
                 wrapperClassName="block w-full min-w-0 overflow-hidden"
               >
                 <div
-                  className={`block w-full min-w-0 truncate ${roleNameClass} ${titleLeadingClass} text-base-content hover:text-primary transition-colors`}
+                  className={`block w-full min-w-0 truncate ${roleNameClass} ${titleLeadingClass} text-[var(--color-primary-focus)] transition-colors`}
                 >
                   {role_name || "Vacant Role"}
                 </div>

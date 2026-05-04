@@ -59,7 +59,10 @@ import {
   enrichTeamMatchData,
 } from "../../utils/teamMatchUtils";
 import { getMatchTier } from "../../utils/matchScoreUtils";
-import { calculateDistanceKm } from "../../utils/locationUtils";
+import {
+  calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
+} from "../../utils/locationUtils";
 import { DEMO_TEAM_TOOLTIP, isSyntheticTeam } from "../../utils/userHelpers";
 
 const normalizeTeamTagIds = (team) => {
@@ -1302,18 +1305,28 @@ const TeamDetailsModal = ({
 
   const effectiveTeamDistanceKm = useMemo(() => {
     const rawDistance = team?.distance_km ?? team?.distanceKm;
-    const numericDistance = Number(rawDistance);
+    const numericDistance =
+      rawDistance != null ? Number(rawDistance) : null;
     const viewerForDistance = distanceViewerUser ?? user;
     const computedDistance = viewerForDistance
       ? calculateDistanceKm(viewerForDistance, team)
       : null;
+    const rawZeroLooksWrong =
+      Number.isFinite(numericDistance) &&
+      numericDistance <= 0.5 &&
+      viewerForDistance &&
+      locationsHaveDifferentKnownParts(viewerForDistance, team);
+
+    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
+      if (rawZeroLooksWrong) {
+        return computedDistance;
+      }
+
+      return numericDistance;
+    }
 
     if (computedDistance != null) {
       return computedDistance;
-    }
-
-    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
-      return numericDistance;
     }
 
     return null;
@@ -1423,7 +1436,7 @@ const TeamDetailsModal = ({
                 {/* Team header with avatar */}
                 <div className="flex items-start space-x-4 mb-6">
                   <div className="avatar placeholder relative">
-                    <div className="bg-primary text-primary-content rounded-full w-16 h-16 relative flex items-center justify-center overflow-hidden">
+                    <div className="bg-[var(--color-primary-focus)] text-primary-content rounded-full w-16 h-16 relative flex items-center justify-center overflow-hidden">
                       {(team?.teamavatar_url || team?.teamavatarUrl) &&
                       !teamImageError ? (
                         <img

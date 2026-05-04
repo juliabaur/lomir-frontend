@@ -23,6 +23,7 @@ export const COUNTRY_NAMES = {
   FI: "Finland",
   US: "United States",
   CA: "Canada",
+  CO: "Colombia",
   AU: "Australia",
   JP: "Japan",
   CN: "China",
@@ -71,6 +72,7 @@ export const COUNTRY_NAME_TO_CODE = {
   Finland: "FI",
   "United States": "US",
   Canada: "CA",
+  Colombia: "CO",
   Australia: "AU",
   Japan: "JP",
   China: "CN",
@@ -116,6 +118,8 @@ export const COUNTRY_NAME_TO_CODE = {
   Suomi: "FI",
   "United States of America": "US",
   USA: "US",
+  Colombie: "CO",
+  Kolumbien: "CO",
   UK: "GB",
   "Great Britain": "GB",
   England: "GB",
@@ -186,6 +190,9 @@ export const getCountryCode = (countryName) => {
  * @param {Object} entity - User or team object
  * @returns {Object} Normalized location data
  */
+const firstPresent = (...values) =>
+  values.find((value) => value !== null && value !== undefined && value !== "");
+
 export const normalizeLocationData = (entity) => {
   if (!entity) {
     return {
@@ -201,12 +208,58 @@ export const normalizeLocationData = (entity) => {
     };
   }
 
-  const postalCode = entity.postal_code || entity.postalCode || null;
-  const city = entity.city || null;
-  const state = entity.state || null;
-  const country = entity.country || null;
-  const latitude = entity.latitude || null;
-  const longitude = entity.longitude || null;
+  const postalCode = firstPresent(
+    entity.postal_code,
+    entity.postalCode,
+    entity.location?.postal_code,
+    entity.location?.postalCode,
+    entity.role_location?.postal_code,
+    entity.role_location?.postalCode,
+    entity.roleLocation?.postal_code,
+    entity.roleLocation?.postalCode,
+  ) ?? null;
+  const city = firstPresent(
+    entity.city,
+    entity.location?.city,
+    entity.role_location?.city,
+    entity.roleLocation?.city,
+  ) ?? null;
+  const state = firstPresent(
+    entity.state,
+    entity.location?.state,
+    entity.role_location?.state,
+    entity.roleLocation?.state,
+  ) ?? null;
+  const country = firstPresent(
+    entity.country,
+    entity.location?.country,
+    entity.role_location?.country,
+    entity.roleLocation?.country,
+  ) ?? null;
+  const latitude = firstPresent(
+    entity.latitude,
+    entity.lat,
+    entity.location?.latitude,
+    entity.location?.lat,
+    entity.role_location?.latitude,
+    entity.role_location?.lat,
+    entity.roleLocation?.latitude,
+    entity.roleLocation?.lat,
+  ) ?? null;
+  const longitude = firstPresent(
+    entity.longitude,
+    entity.lng,
+    entity.lon,
+    entity.location?.longitude,
+    entity.location?.lng,
+    entity.location?.lon,
+    entity.role_location?.longitude,
+    entity.role_location?.lng,
+    entity.role_location?.lon,
+    entity.roleLocation?.longitude,
+    entity.roleLocation?.lng,
+    entity.roleLocation?.lon,
+  ) ?? null;
   const isRemote = entity.is_remote === true || entity.isRemote === true;
 
   // Determine if we have any location data
@@ -223,6 +276,41 @@ export const normalizeLocationData = (entity) => {
     isRemote,
     hasLocation,
   };
+};
+
+const normalizeComparableLocationValue = (value) =>
+  value == null ? "" : String(value).trim().toLowerCase();
+
+const normalizeComparableCountry = (value) =>
+  getCountryCode(value == null ? null : String(value)) ??
+  normalizeComparableLocationValue(value);
+
+export const locationsHaveDifferentKnownParts = (source, target) => {
+  const from = normalizeLocationData(source);
+  const to = normalizeLocationData(target);
+  const postalCodeFrom = normalizeComparableLocationValue(from.postalCode);
+  const postalCodeTo = normalizeComparableLocationValue(to.postalCode);
+  const cityFrom = normalizeComparableLocationValue(from.city);
+  const cityTo = normalizeComparableLocationValue(to.city);
+  const stateFrom = normalizeComparableLocationValue(from.state);
+  const stateTo = normalizeComparableLocationValue(to.state);
+  const countryFrom = normalizeComparableCountry(from.country);
+  const countryTo = normalizeComparableCountry(to.country);
+
+  const differs = (left, right) => left && right && left !== right;
+
+  if (differs(countryFrom, countryTo) || differs(cityFrom, cityTo)) {
+    return true;
+  }
+
+  if (cityFrom && cityFrom === cityTo) {
+    return false;
+  }
+
+  return (
+    differs(stateFrom, stateTo) ||
+    differs(postalCodeFrom, postalCodeTo)
+  );
 };
 
 /**
@@ -314,6 +402,10 @@ export const hasLocationChanged = (newData, oldData) => {
 };
 
 const toCoordinate = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
 };
@@ -350,7 +442,13 @@ export const calculateDistanceKm = (source, target) => {
       Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return earthRadiusKm * c;
+  const distanceKm = earthRadiusKm * c;
+
+  if (distanceKm <= 0.5 && locationsHaveDifferentKnownParts(source, target)) {
+    return null;
+  }
+
+  return distanceKm;
 };
 
 export default {
@@ -362,4 +460,5 @@ export default {
   formatLocation,
   hasLocationChanged,
   calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
 };

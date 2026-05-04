@@ -259,7 +259,7 @@ const TeamMembersSection = ({
                     />
                   ) : null}
                   <div
-                    className="avatar-fallback placeholder bg-primary text-primary-content rounded-full w-full h-full absolute inset-0 flex items-center justify-center"
+                    className="avatar-fallback placeholder bg-[var(--color-primary-focus)] text-primary-content rounded-full w-full h-full absolute inset-0 flex items-center justify-center"
                     style={{ display: memberAvatarUrl ? "none" : "flex" }}
                   >
                     <span className="text-lg">

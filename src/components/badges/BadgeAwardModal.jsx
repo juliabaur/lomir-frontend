@@ -413,7 +413,7 @@ const BadgeAwardModal = ({
           />
         ) : null}
         <div
-          className="w-7 h-7 rounded-full bg-primary text-primary-content flex items-center justify-center font-medium text-xs"
+          className="w-7 h-7 rounded-full bg-[var(--color-primary-focus)] text-primary-content flex items-center justify-center font-medium text-xs"
           style={{ display: awardeeAvatar ? "none" : "flex" }}
         >
           {getUserInitials({

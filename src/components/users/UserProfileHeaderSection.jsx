@@ -108,7 +108,7 @@ const UserProfileHeaderSection = ({
               onError={() => setImageError(true)}
             />
           ) : (
-            <div className="bg-primary text-primary-content flex items-center justify-center w-full h-full rounded-full">
+            <div className="bg-[var(--color-primary-focus)] text-primary-content flex items-center justify-center w-full h-full rounded-full">
               <span className="text-2xl">{getUserInitials(user)}</span>
             </div>
           )}

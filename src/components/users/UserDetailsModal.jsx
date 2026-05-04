@@ -25,7 +25,10 @@ import {
   enrichUserMatchData,
   enrichUserRoleMatchData,
 } from "../../utils/teamMatchUtils";
-import { calculateDistanceKm } from "../../utils/locationUtils";
+import {
+  calculateDistanceKm,
+  locationsHaveDifferentKnownParts,
+} from "../../utils/locationUtils";
 
 const normalizeNumericSet = (values) => {
   if (values == null) return null;
@@ -73,6 +76,7 @@ const UserDetailsModal = ({
   roleMatchBadgeNames, // Set<string> | null — role's required badge names (lowercase)
   roleMatchName = null,
   roleMatchMaxDistanceKm = null,
+  isFromSearch = false,
   showMatchHighlights = false,
   matchScore = null,
   matchType = null,
@@ -162,10 +166,10 @@ const UserDetailsModal = ({
 
       const preservedDistanceKm =
         distanceKm ??
-        user?.distance_km ??
         user?.distanceKm ??
-        userData?.distance_km ??
+        user?.distance_km ??
         userData?.distanceKm ??
+        userData?.distance_km ??
         null;
 
       setUser({
@@ -363,6 +367,11 @@ const UserDetailsModal = ({
   };
 
   const effectiveUserMatch = useMemo(() => {
+    const isRoleMatchContext =
+      matchType === "role_match" ||
+      hasRoleMatchTagIds ||
+      hasRoleMatchBadgeNames;
+
     const shouldResolveMatchData =
       showMatchHighlights ||
       matchScore > 0 ||
@@ -373,10 +382,9 @@ const UserDetailsModal = ({
       return { matchScore, matchType, matchDetails };
     }
 
-    const isRoleMatchContext =
-      matchType === "role_match" ||
-      hasRoleMatchTagIds ||
-      hasRoleMatchBadgeNames;
+    if (isFromSearch && matchScore != null && isRoleMatchContext) {
+      return { matchScore, matchType, matchDetails };
+    }
 
     if (isRoleMatchContext) {
       const enrichedUser = enrichUserRoleMatchData({
@@ -429,6 +437,7 @@ const UserDetailsModal = ({
     currentUser,
     currentUserBadgeNames,
     currentUserTagIds,
+    isFromSearch,
     matchDetails,
     matchScore,
     matchType,
@@ -442,31 +451,43 @@ const UserDetailsModal = ({
   ]);
 
   const effectiveDistanceKm = useMemo(() => {
-    const roleDistance = Number(
+    const rawRoleDistance =
       effectiveUserMatch.matchType === "role_match"
         ? effectiveUserMatch.matchDetails?.distanceKm ??
-            effectiveUserMatch.matchDetails?.distance_km ??
-            matchDetails?.distanceKm ??
-            matchDetails?.distance_km
-        : null,
-    );
-    const rawDistance = distanceKm ?? user?.distance_km ?? user?.distanceKm;
-    const numericDistance = Number(rawDistance);
+          effectiveUserMatch.matchDetails?.distance_km ??
+          matchDetails?.distanceKm ??
+          matchDetails?.distance_km ??
+          null
+        : null;
+    const roleDistance =
+      rawRoleDistance != null ? Number(rawRoleDistance) : null;
+    const rawDistance = distanceKm ?? user?.distanceKm ?? user?.distance_km;
+    const numericDistance =
+      rawDistance != null ? Number(rawDistance) : null;
     const viewerForDistance = distanceViewerUser ?? currentUser;
     const computedDistance = viewerForDistance
       ? calculateDistanceKm(viewerForDistance, user)
       : null;
+    const rawZeroLooksWrong =
+      Number.isFinite(numericDistance) &&
+      numericDistance <= 0.5 &&
+      viewerForDistance &&
+      locationsHaveDifferentKnownParts(viewerForDistance, user);
 
-    if (Number.isFinite(roleDistance) && roleDistance < 999999) {
+    if (roleDistance != null && Number.isFinite(roleDistance) && roleDistance < 999999) {
       return roleDistance;
+    }
+
+    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
+      if (rawZeroLooksWrong) {
+        return computedDistance;
+      }
+
+      return numericDistance;
     }
 
     if (computedDistance != null) {
       return computedDistance;
-    }
-
-    if (Number.isFinite(numericDistance) && numericDistance < 999999) {
-      return numericDistance;
     }
 
     return null;
