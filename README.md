@@ -18,20 +18,25 @@ Built with React 19, Vite, Tailwind CSS, and DaisyUI.
 | Backend  | Render   | [lomir-backend-knae.onrender.com](https://lomir-backend-knae.onrender.com) |
 | Database | Neon     | PostgreSQL (remote) |
 
+### Test Credentials
+
+Contact the project owner for a demo login, or register a new account with a valid email address (email verification is required).
+
 ---
 
 ## Features
 
-- **Search & Discovery** — Find teams, users, and vacant roles by keyword, tags, badges, or location in list view; map view is planned
-- **Best Match Sorting** — Weighted matching algorithm scores teams and roles against your profile
-- **Team Management** — Create teams, manage members, post vacant roles, handle applications and invitations
-- **User Profiles** — Customizable profiles with interest tags, badges, avatar uploads, and location
-- **Real-Time Chat** — Direct and team group messaging with typing indicators and read receipts (Socket.IO)
-- **Badge System** — Browse 30 badges across 5 color-coded categories; award badges to teammates
-- **Interactive Map (Planned)** — Leaflet/React Leaflet-powered map view and distance-based filtering are planned but not yet implemented
-- **Notifications** — In-app notification center for invitations, applications, and badge awards
-- **Boolean Search** — Advanced search input with pill-based tag/badge/criteria filters
+- **Search & Discovery** — Find teams, users, and vacant roles by keyword, tags, badges, or location; toggle between list view and interactive map view
+- **Best Match Sorting** — Weighted matching algorithm scores teams and roles against your profile (tags 40%, badges 30%, distance 30%)
+- **Map View** — Leaflet-powered map with custom markers for teams, users, and roles; popups with detail cards; distance-based filtering and proximity sorting
+- **Team Management** — Create teams, manage members and roles, post vacant roles, handle applications and invitations with role-specific targeting
+- **User Profiles** — Customizable profiles with interest tags, badges, avatar uploads (ImageKit), and geocoded location
+- **Real-Time Chat** — Direct and team group messaging with typing indicators, read receipts, and file/image sharing (Socket.IO)
+- **Badge System** — Browse 30 badges across 5 color-coded categories; award badges to teammates with reasons and team context
+- **Notifications** — In-app notification center for invitations, applications, badge awards, and role updates
 - **Account Deletion** — Multi-step account deletion with impact preview, automatic team ownership transfer, and graceful "Former Lomir User" handling across chat, badges, and notifications
+- **Demo Data Indicators** — Synthetic/seed data is visually labeled with FlaskConical icons and "DEMO" avatar overlays so users can distinguish test content from real data
+- **Security** — Cloudflare Turnstile CAPTCHA on registration (feature-flagged), enforced password policy (min 8 chars, letter + number)
 
 ---
 
@@ -45,9 +50,12 @@ Built with React 19, Vite, Tailwind CSS, and DaisyUI.
 | Routing | React Router 7 |
 | HTTP Client | Axios |
 | Real-time | Socket.IO Client |
-| Maps (planned) | Leaflet + React Leaflet |
+| Maps | Leaflet + React Leaflet |
 | Icons | Lucide React, React Icons |
 | Date Utilities | date-fns |
+| Autocomplete | Downshift |
+| Image Uploads | ImageKit (client-side upload with server-authenticated tokens) |
+| CAPTCHA | Cloudflare Turnstile (feature-flagged) |
 
 ---
 
@@ -58,13 +66,11 @@ Built with React 19, Vite, Tailwind CSS, and DaisyUI.
 - **Node.js** v18+ and npm
 - The [Lomir backend](https://github.com/KasparSinitsin/Lomir-backend) running on `http://localhost:5001`
 
-### 1. Clone and switch to `dev`
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/KasparSinitsin/Lomir-frontend.git
 cd Lomir-frontend
-git checkout dev
-git pull origin dev
 ```
 
 ### 2. Install dependencies
@@ -81,28 +87,20 @@ Create a `.env` file in the project root:
 # API connection
 VITE_API_URL=http://localhost:5001
 
-# Optional Socket.IO override
-VITE_SOCKET_URL=http://localhost:5001
+# Optional Socket.IO override (defaults to VITE_API_URL if unset)
+# VITE_SOCKET_URL=http://localhost:5001
 
 # ImageKit (image/file uploads — get values from the project owner)
 VITE_IMAGEKIT_PUBLIC_KEY=<your-public-key>
 VITE_IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/<your-id>
 
-# Cloudflare Turnstile (optional for local dev — if unset, CAPTCHA widget is not shown)
+# Cloudflare Turnstile (optional for local dev — if unset, CAPTCHA is not shown)
 # VITE_TURNSTILE_SITE_KEY=<turnstile-site-key>
 ```
 
 > Get the ImageKit values from the project owner.
 
-### 4. Verify the API base URL
-
-Open `src/services/api.js` and make sure it points to localhost:
-
-```js
-const API_URL = "http://localhost:5001";
-```
-
-### 5. Start the dev server
+### 4. Start the dev server
 
 ```bash
 npm run dev
@@ -134,36 +132,42 @@ Lomir-frontend/
 │   ├── index.css                   # Global styles + Tailwind imports
 │   ├── pages/
 │   │   ├── Home.jsx                # Public landing page
-│   │   ├── SearchPage.jsx          # Search page; map view is planned
+│   │   ├── SearchPage.jsx          # Search with list/map toggle, advanced filtering
 │   │   ├── MyTeams.jsx             # User's teams, invitations, applications
 │   │   ├── Profile.jsx             # User profile editing
-│   │   ├── Register.jsx            # Multi-step registration
+│   │   ├── PublicProfile.jsx       # Profile placeholder for deleted/missing users
+│   │   ├── Register.jsx            # Multi-step registration with CAPTCHA
 │   │   ├── Login.jsx
-│   │   ├── Chat.jsx                # Direct + team messaging
+│   │   ├── Chat.jsx                # Direct + team messaging with file sharing
 │   │   ├── BadgeOverview.jsx       # Badge catalog and details
+│   │   ├── Settings.jsx            # Password change + account deletion modal
 │   │   ├── ForgotPassword.jsx
 │   │   ├── ResetPassword.jsx
 │   │   ├── VerifyEmail.jsx
-│   │   ├── PublicProfile.jsx       # Deleted user profile placeholder
-│   │   └── Settings.jsx
+│   │   └── DesignSystem.jsx        # Dev-only component playground
 │   ├── components/
-│   │   ├── auth/                   # Login/register forms
-│   │   ├── teams/                  # Team cards, modals, vacant roles, applications
-│   │   ├── users/                  # User cards, detail modals, deleted user handling
-│   │   ├── badges/                 # Badge display, awarding, category modals
+│   │   ├── auth/                   # Login/register forms, TurnstileWidget
+│   │   ├── teams/                  # Team cards, detail modals, vacant roles,
+│   │   │                           #   applications, invitations, member management
+│   │   ├── users/                  # User cards, detail modals, InlineUserLink,
+│   │   │                           #   UserAvatar, DemoAvatarOverlay, deleted user handling
+│   │   ├── badges/                 # Badge display, awarding, category modals, AwardCard
 │   │   ├── tags/                   # Tag input, display, and selection
-│   │   ├── chat/                   # Chat UI components
-│   │   ├── common/                 # Shared UI (Button, Card, Modal, Alert, Pagination, TurnstileWidget...)
+│   │   ├── chat/                   # Chat UI, message bubbles, file previews
+│   │   ├── search/                 # SearchMapView (Leaflet map with markers/popups)
+│   │   ├── common/                 # Shared UI: Button, Card, Modal, Alert, Pagination,
+│   │   │                           #   ImageUploader, LocationInput, TurnstileWidget,
+│   │   │                           #   PersonRequestCard, RequestListModal, Tooltip...
 │   │   └── layout/                 # Navbar, Footer, PageContainer, Grid, Section
 │   ├── contexts/
 │   │   ├── AuthContext.jsx         # Authentication state + JWT management
-│   │   ├── UserModalContext.jsx    # Global user detail modal
+│   │   ├── UserModalContext.jsx    # Global user detail modal stack
 │   │   ├── TeamModalContext.jsx    # Global team detail modal state
-│   │   └── ModalLayerContext.jsx   # Modal stacking support
+│   │   └── ModalLayerContext.jsx   # Modal z-index stacking
 │   ├── services/
-│   │   ├── api.js                  # Axios instance with interceptors
+│   │   ├── api.js                  # Axios instance with interceptors (camelCase ↔ snake_case)
 │   │   ├── authService.js
-│   │   ├── userService.js
+│   │   ├── userService.js          # Includes deletionPreview + deleteUser
 │   │   ├── teamService.js
 │   │   ├── searchService.js
 │   │   ├── matchingService.js
@@ -174,12 +178,23 @@ Lomir-frontend/
 │   │   ├── notificationService.js
 │   │   ├── socketService.js        # Socket.IO client wrapper
 │   │   └── geocodingService.js
-│   ├── hooks/                      # Custom hooks (useViewerMatchProfile, useAwardModals...)
-│   ├── utils/                      # Helper functions (teamMatchUtils, locationUtils...)
-│   │   ├── deletedUser.js          # "Former Lomir User" display utilities
-│   ├── constants/                  # Badge constants, UI text, pagination config
+│   ├── hooks/
+│   │   ├── useHydratedRole.js      # Fetch full role details + match score for modals
+│   │   ├── useLocationAutoFill.js  # Geocoding-based city/country auto-fill from postal code
+│   │   ├── useAwardModals.js       # Badge award modal state management
+│   │   └── useViewerMatchProfile.js # Viewer's tags/badges/location for client-side scoring
+│   ├── utils/
+│   │   ├── deletedUser.js          # "Former Lomir User" display utilities + FormerUserAvatar
+│   │   ├── userHelpers.js          # Initials, display names, isSynthetic* helpers, demo tooltips
+│   │   ├── teamMatchUtils.js       # Team/role match scoring + overlap calculations
+│   │   ├── matchScoreUtils.js      # Match tier color coding (green/yellow/orange)
+│   │   └── locationUtils.js        # Haversine distance calculation
+│   ├── constants/
+│   │   ├── badgeConstants.js       # Badge category colors
+│   │   ├── uiText.js              # Shared UI strings
+│   │   └── paginationConfig.js
 │   ├── config/
-│   │   └── imagekit.js             # ImageKit upload helper
+│   │   └── imagekit.js             # ImageKit upload helper with folder routing
 │   └── assets/                     # Logos, gradients, and icon assets
 ├── tailwind.config.js
 ├── postcss.config.js
@@ -195,25 +210,55 @@ Lomir-frontend/
 
 | Route | Page | Description |
 |---|---|---|
-| `/` | Landing Page | Public homepage |
-| `/search` | Search | Find teams, users, and roles in list view; map view is planned |
+| `/` | Landing Page | Public homepage with feature overview |
+| `/search` | Search | Find teams, users, and roles; list/map toggle; advanced filtering by tags, badges, distance |
 | `/teams/my-teams` | My Teams | Teams you belong to, pending invitations and applications |
 | `/profile` | Profile | Edit your profile, tags, avatar, and location |
-| `/profile/:id` | Public Profile | View any user's profile; shows placeholder for deleted users |
-| `/chat` | Chat | Direct messages and team group chat |
-| `/badges` | Badges | Browse all badges and their categories |
+| `/profile/:id` | Public Profile | View any user's profile; shows placeholder for deleted/missing users |
+| `/chat` | Chat | Direct messages and team group chat with file sharing |
+| `/badges` | Badges | Browse all 30 badges across 5 categories |
+| `/settings` | Settings | Change password and delete account |
+
+---
+
+## Search & Matching
+
+The search page supports multiple sort and filter modes:
+
+**Sort options:** Name (A–Z / Z–A), Newest, Recently updated, Best Match, Proximity (nearest / remote first), Capacity (member slots or open roles)
+
+**Filter options:** Filter by tags, filter by badges, distance radius, open roles only, exclude teams you're already in, include/exclude demo data
+
+**Best Match scoring** uses the backend matching engine (tag overlap 40%, badge overlap 30%, distance 30%) and falls back to client-side profile overlap calculations when backend scores aren't available.
+
+**Map view** renders all results on a Leaflet map with color-coded markers. Clicking a marker shows a popup with the team/user/role card. Distance indicators show how far each result is from your location.
+
+---
+
+## Account Deletion
+
+The deletion flow in Settings follows a three-step process:
+
+1. **Password confirmation** — Validates identity before showing any impact data
+2. **Impact preview** — Shows teams to be transferred (with successor override), teams to be deleted, roles to be reopened, and affected counts
+3. **Confirm & execute** — Triggers the backend transaction; on success, logs out and redirects to home
+
+All components handle deleted user references gracefully: chat messages show "Former Lomir User" with a grey avatar, badge awards preserve the badge but show a null awarder, and profile links show a placeholder page.
 
 ---
 
 ## Troubleshooting
 
-- **CORS errors** — Make sure the backend is running on port 5001 and the frontend on 5173
-- **Socket.IO won't connect** — Verify `VITE_SOCKET_URL` in `.env` if you set it; otherwise the client falls back to `http://localhost:5001`
-- **"Access denied. No token provided."** — You need to be logged in; check that `localStorage` has a valid token
-- **Port already in use** — `lsof -i :5173` to find the process, `kill -9 <PID>` to free it
+- **CORS errors** — Make sure the backend is running on port 5001 and the frontend on 5173; check that `VITE_API_URL` matches
+- **Socket.IO won't connect** — Verify `VITE_SOCKET_URL` in `.env` if you set it; otherwise the client falls back to `VITE_API_URL`
+- **"Access denied. No token provided."** — Your JWT has expired; log out and log back in
+- **CAPTCHA not showing locally** — Expected behavior; if `VITE_TURNSTILE_SITE_KEY` is unset, registration skips CAPTCHA
+- **Images not uploading** — Check that `VITE_IMAGEKIT_PUBLIC_KEY` and `VITE_IMAGEKIT_URL_ENDPOINT` are set in `.env`
+- **Map not rendering** — Leaflet CSS must be imported; check that `leaflet` and `react-leaflet` are installed
 
 ---
 
 ## Related
 
 - **Backend repo:** [Lomir-backend](https://github.com/KasparSinitsin/Lomir-backend)
+- **Account deletion spec:** Backend repo → `docs/USER_DELETION_SPEC.md`
