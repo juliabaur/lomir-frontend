@@ -1,0 +1,496 @@
+import { parseSystemMessage } from "../utils/messageSystemParser";
+import { formatDisplayName } from "../utils/nameFormatters";
+import { normalizeTimestampToDate } from "../utils/dateHelpers";
+import { messageService } from "../services/messageService";
+import {
+  getConversationPartnerId,
+  isDirectConversationForPartner,
+} from "./chatHelpers";
+
+// Chat search, snippet, highlight and conversation-preview helpers, extracted
+// verbatim from Chat.jsx. Pure functions plus one async preview hydrator that
+// runs inside the conversations queryFn; no component state. See also
+// utils/chatHelpers.js (entity/payload/team-member helpers).
+
+export const CHAT_SEARCH_PAGE_SIZE = 100;
+export const CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION = 500;
+
+export const dedupeConversations = (list) =>
+  (list || []).filter((conv, index, self) => {
+    if (conv.type === "direct") {
+      return (
+        index ===
+        self.findIndex((candidate) =>
+          isDirectConversationForPartner(
+            candidate,
+            getConversationPartnerId(conv),
+          ),
+        )
+      );
+    }
+
+    return index === self.findIndex((candidate) => candidate.id === conv.id);
+  });
+
+export const getConversationSearchKey = (conversation) =>
+  `${conversation?.type || "direct"}:${conversation?.id}`;
+
+export const normalizeChatSearchText = (value) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+export const countChatSearchMatches = (value, normalizedQuery) => {
+  if (!value || !normalizedQuery) return 0;
+
+  let count = 0;
+  let startIndex = 0;
+
+  while (startIndex < value.length) {
+    const matchIndex = value.indexOf(normalizedQuery, startIndex);
+    if (matchIndex === -1) break;
+
+    count += 1;
+    startIndex = matchIndex + normalizedQuery.length;
+  }
+
+  return count;
+};
+
+const addSearchPart = (parts, value) => {
+  if (value == null) return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => addSearchPart(parts, item));
+    return;
+  }
+
+  if (typeof value === "object") return;
+
+  const text = String(value).trim();
+  if (text) parts.push(text);
+};
+
+const addUserSearchParts = (parts, user) => {
+  if (!user) return;
+  const hasUserText =
+    user.name ||
+    user.username ||
+    user.userName ||
+    user.firstName ||
+    user.first_name ||
+    user.lastName ||
+    user.last_name;
+
+  if (!hasUserText) return;
+
+  addSearchPart(parts, [
+    user.name,
+    user.username,
+    user.userName,
+    user.firstName,
+    user.first_name,
+    user.lastName,
+    user.last_name,
+    formatDisplayName(user),
+  ]);
+};
+
+export const buildMessageSearchText = (message) => {
+  const parts = [];
+  const parsedSystemMessage = parseSystemMessage(message?.content);
+  const systemMessageText = buildSystemMessageSearchSnippet(parsedSystemMessage);
+
+  addSearchPart(parts, [
+    message?.content,
+    systemMessageText,
+    message?.fileName,
+    message?.file_name,
+    message?.senderUsername,
+    message?.sender_username,
+  ]);
+  addUserSearchParts(parts, message?.sender);
+  addUserSearchParts(parts, {
+    firstName: message?.senderFirstName,
+    first_name: message?.sender_first_name,
+    lastName: message?.senderLastName,
+    last_name: message?.sender_last_name,
+    username: message?.senderUsername || message?.sender_username,
+  });
+
+  return normalizeChatSearchText(parts.join(" "));
+};
+
+const buildSystemMessageSearchSnippet = (parsedMessage) => {
+  if (!parsedMessage) return "";
+
+  switch (parsedMessage.type) {
+    case "application_approved_dm":
+      return [
+        `You approved ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}`,
+        `Your application to ${parsedMessage.teamName} was approved by ${parsedMessage.approverName}`,
+        parsedMessage.hasPersonalMessage ? "who added this message" : "Welcome to the team",
+      ].join(". ");
+    case "application_approved":
+      return [
+        `Your application was approved by ${parsedMessage.approverName}. Welcome to the team`,
+        `${parsedMessage.applicantName} has applied successfully and was added by ${parsedMessage.approverName}. Say hello to them`,
+      ].join(". ");
+    case "application_declined":
+      return [
+        `You declined ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}`,
+        `Your application to ${parsedMessage.teamName} was declined by ${parsedMessage.approverName}`,
+        parsedMessage.hasPersonalMessage
+          ? "who added this message"
+          : "Want to reach out to them in this chat",
+      ].join(". ");
+    case "application_response":
+      return `Response to your application for ${parsedMessage.teamName}. Your decline response to ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}. ${parsedMessage.personalMessage || ""}`;
+    case "invitation_declined":
+      return [
+        `You declined ${parsedMessage.inviterName}'s invitation for ${parsedMessage.teamName}`,
+        `Your invitation for ${parsedMessage.teamName} was declined by ${parsedMessage.inviteeName}`,
+        parsedMessage.hasPersonalMessage
+          ? "who added this message"
+          : "Want to reach out to them in this chat",
+      ].join(". ");
+    case "invitation_response":
+      return `Response to your invitation for ${parsedMessage.teamName}. ${parsedMessage.personalMessage || ""}`;
+    case "team_join":
+      return `${parsedMessage.userName} joined the team. You joined the team. Welcome aboard. ${parsedMessage.personalMessage || ""}`;
+    case "team_leave":
+      return `${parsedMessage.userName} has left the team. You have left the team.`;
+    case "role_application_approved":
+      return `${parsedMessage.applicantName}'s application for ${parsedMessage.roleName} was approved.`;
+    case "role_reopened":
+      return `${parsedMessage.userName} has left the role ${parsedMessage.roleName}. The role is open again to be filled.`;
+    case "role_filled":
+      return parsedMessage.userName && parsedMessage.userName !== "Someone"
+        ? `${parsedMessage.userName} is now filling the role ${parsedMessage.roleName}.`
+        : `The role ${parsedMessage.roleName} was marked as filled.`;
+    case "member_removed_public":
+      return `${parsedMessage.userName} has been removed from the team. You removed ${parsedMessage.userName} from the team.`;
+    case "invitation_cancelled":
+      return `${parsedMessage.cancellerName} cancelled your invitation to join ${parsedMessage.teamName}. You cancelled your invitation for ${parsedMessage.inviteeName} to join ${parsedMessage.teamName}.`;
+    case "application_cancelled":
+      return `${parsedMessage.applicantName} cancelled their application for ${parsedMessage.teamName}. You cancelled your application for ${parsedMessage.teamName}.`;
+    case "member_removed":
+      return `You were removed from ${parsedMessage.teamName} by ${parsedMessage.removerName}. You removed ${parsedMessage.memberName} from ${parsedMessage.teamName}.`;
+    case "role_changed":
+      return `Your role in ${parsedMessage.teamName} was changed to ${parsedMessage.newRole} by ${parsedMessage.changerName}. You changed ${parsedMessage.memberName}'s role to ${parsedMessage.newRole} in ${parsedMessage.teamName}.`;
+    case "ownership_team":
+      return `${parsedMessage.prevOwnerName} transferred ownership to ${parsedMessage.newOwnerName}`;
+    case "ownership_transferred":
+      return `${parsedMessage.prevOwnerName} transferred ownership of ${parsedMessage.teamName} to you. You transferred team ownership of ${parsedMessage.teamName} to ${parsedMessage.newOwnerName}. Congratulations`;
+    case "team_deleted":
+      return `${parsedMessage.ownerName} deleted the team ${parsedMessage.teamName}. You deleted the team ${parsedMessage.teamName}.`;
+    default:
+      return "";
+  }
+};
+
+const buildMessageSearchSnippet = (message) => {
+  const parsedSystemMessage = parseSystemMessage(message?.content);
+  const systemMessageText = buildSystemMessageSearchSnippet(parsedSystemMessage);
+  const senderName = [
+    message?.senderFirstName || message?.sender_first_name,
+    message?.senderLastName || message?.sender_last_name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const sender =
+    senderName ||
+    message?.senderUsername ||
+    message?.sender_username ||
+    message?.sender?.username ||
+    "";
+  const body =
+    systemMessageText ||
+    message?.content ||
+    message?.fileName ||
+    message?.file_name ||
+    (message?.imageUrl || message?.image_url ? "Image" : "") ||
+    (message?.fileUrl || message?.file_url ? "File" : "");
+
+  return [sender, body].filter(Boolean).join(": ");
+};
+
+const getMessageSearchId = (message) =>
+  message?.id || message?.messageId || message?.message_id || null;
+
+const NOTIFICATION_EVENT_MESSAGE_MARKERS = {
+  application_approved: ["APPLICATION_APPROVED"],
+  application_rejected: ["APPLICATION_DECLINED"],
+  application_cancelled: ["APPLICATION_CANCELLED"],
+  role_application_cancelled: ["APPLICATION_CANCELLED"],
+  invitation_declined: ["INVITATION_DECLINED"],
+  invitation_cancelled: ["INVITATION_CANCELLED"],
+  member_left: ["MEMBER_LEFT", "MEMBER_REMOVED_PUBLIC"],
+  member_removed: ["MEMBER_REMOVED"],
+  ownership_transferred: ["OWNERSHIP_TRANSFERRED"],
+  role_changed: ["ROLE_CHANGED"],
+  role_created: ["ROLE_CREATED"],
+  role_updated: ["ROLE_UPDATED"],
+  role_deleted: ["ROLE_DELETED"],
+  role_closed: ["ROLE_CLOSED"],
+  role_filled: [
+    "ROLE_FILLED",
+    "ROLE_APPLICATION_FILLED",
+    "ROLE_INVITATION_FILLED",
+  ],
+  role_application_deferred_invite: ["ROLE_APPLICATION_DEFERRED_INVITE"],
+  role_reopened: ["ROLE_REOPENED"],
+  role_reopened_admin: ["ROLE_REOPENED_ADMIN"],
+  team_deleted: ["TEAM_DELETED"],
+};
+
+export const getNotificationEventHighlightIds = (messages, eventTarget) => {
+  const type = String(eventTarget?.type || "").toLowerCase();
+  if (!type) return [];
+
+  const markers = NOTIFICATION_EVENT_MESSAGE_MARKERS[type] || [];
+  const referenceId = eventTarget.referenceId
+    ? String(eventTarget.referenceId)
+    : "";
+  const actorId = eventTarget.actorId ? String(eventTarget.actorId) : "";
+  const matchingMessages = (messages || []).filter((message) => {
+    const content = String(message?.content || "");
+    const normalizedContent = content.toUpperCase();
+    const markerMatches =
+      markers.length === 0 ||
+      markers.some((marker) => normalizedContent.includes(marker));
+
+    if (!markerMatches) return false;
+
+    const referenceMatches =
+      !referenceId ||
+      content.includes(`| ${referenceId}:`) ||
+      content.includes(`:${referenceId}:`) ||
+      String(message?.id) === referenceId;
+    const actorMatches =
+      !actorId ||
+      String(message?.senderId ?? message?.sender_id ?? "") === actorId ||
+      content.includes(`${actorId}:`);
+
+    return referenceMatches && actorMatches;
+  });
+
+  const target = matchingMessages[matchingMessages.length - 1];
+  return target?.id ? [target.id] : [];
+};
+
+export const buildConversationLastMessagePreview = (message) => {
+  if (message?.content) return message.content;
+
+  const fileName = message?.fileName || message?.file_name;
+  const fileUrl = message?.fileUrl || message?.file_url;
+  const imageUrl = message?.imageUrl || message?.image_url;
+
+  if (imageUrl) {
+    return fileName ? `Image "${fileName}" sent` : "Image sent";
+  }
+
+  if (fileName || fileUrl) {
+    const ext = fileName?.split(".").pop()?.toLowerCase();
+    const label = ["xls", "xlsx", "csv"].includes(ext) ? "Spreadsheet" : "File";
+    return `${label} "${fileName || "attachment"}" sent`;
+  }
+
+  return message?.content ?? "";
+};
+
+const hasConversationPreview = (conversation) => {
+  const lastMessage = conversation?.lastMessage ?? conversation?.last_message;
+
+  if (typeof lastMessage === "string") {
+    return lastMessage.trim().length > 0;
+  }
+
+  if (lastMessage && typeof lastMessage === "object") {
+    return Boolean(
+      lastMessage.content ||
+        lastMessage.fileName ||
+        lastMessage.file_name ||
+        lastMessage.fileUrl ||
+        lastMessage.file_url ||
+        lastMessage.imageUrl ||
+        lastMessage.image_url,
+    );
+  }
+
+  return Boolean(
+    conversation?.lastMessageFileName ||
+      conversation?.last_message_file_name ||
+      conversation?.lastMessageFileUrl ||
+      conversation?.last_message_file_url ||
+      conversation?.lastMessageImageUrl ||
+      conversation?.last_message_image_url,
+  );
+};
+
+// Fill in last-message previews for conversations the list endpoint returned
+// without one, by fetching the latest message per conversation. Pure: returns a
+// new list with previews merged in (or the input unchanged when nothing needs
+// hydrating), so it can run inside the conversations queryFn.
+export const hydrateConversationPreviews = async (conversationList) => {
+  const conversationsToHydrate = (conversationList || []).filter(
+    (conversation) =>
+      !conversation.isVirtual && !hasConversationPreview(conversation),
+  );
+
+  if (conversationsToHydrate.length === 0) return conversationList || [];
+
+  const hydratedPreviews = await Promise.allSettled(
+    conversationsToHydrate.map(async (conversation) => {
+      const type = conversation.type || "direct";
+      const response = await messageService.getMessages(conversation.id, type, {
+        limit: 1,
+      });
+      const latestMessage = response?.data?.[response.data.length - 1];
+      const preview = buildConversationLastMessagePreview(latestMessage);
+
+      if (!latestMessage || !preview) return null;
+
+      return {
+        id: conversation.id,
+        type,
+        preview,
+        updatedAt:
+          latestMessage.createdAt ||
+          latestMessage.created_at ||
+          conversation.updatedAt,
+      };
+    }),
+  );
+
+  const previewByKey = new Map();
+
+  hydratedPreviews.forEach((result) => {
+    if (result.status !== "fulfilled" || !result.value) return;
+    previewByKey.set(
+      `${result.value.type}:${String(result.value.id)}`,
+      result.value,
+    );
+  });
+
+  if (previewByKey.size === 0) return conversationList || [];
+
+  return (conversationList || []).map((conversation) => {
+    const type = conversation.type || "direct";
+    const hydratedPreview = previewByKey.get(
+      `${type}:${String(conversation.id)}`,
+    );
+
+    if (!hydratedPreview || hasConversationPreview(conversation)) {
+      return conversation;
+    }
+
+    return {
+      ...conversation,
+      lastMessage: hydratedPreview.preview,
+      updatedAt: hydratedPreview.updatedAt || conversation.updatedAt,
+    };
+  });
+};
+
+const getMessageSearchTimestamp = (message) => {
+  const timestamp =
+    message?.createdAt ||
+    message?.created_at ||
+    message?.sentAt ||
+    message?.sent_at ||
+    message?.updatedAt ||
+    message?.updated_at;
+  const parsedDate = normalizeTimestampToDate(timestamp);
+
+  return parsedDate?.getTime() ?? 0;
+};
+
+const getMessageSearchTimestampValue = (message) =>
+  message?.createdAt ||
+  message?.created_at ||
+  message?.sentAt ||
+  message?.sent_at ||
+  message?.updatedAt ||
+  message?.updated_at ||
+  null;
+
+export const buildMessageSearchSnippets = (messages) =>
+  (messages || [])
+    .map((message, index) => ({
+      message,
+      index,
+      timestamp: getMessageSearchTimestamp(message),
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp || a.index - b.index)
+    .map(({ message }) => ({
+      id: getMessageSearchId(message),
+      text: buildMessageSearchSnippet(message),
+      // Raw content is kept alongside the humanised search text so the
+      // conversation list can render a matched system/event message with its
+      // canonical icon + colour styling (via getEventPreview), not just plain text.
+      content: message?.content ?? "",
+      timestamp: getMessageSearchTimestampValue(message),
+    }))
+    .filter((snippet) => snippet.text);
+
+export const buildLatestMatchPreview = (snippet, normalizedQuery) => {
+  const text = String(snippet || "").trim();
+  if (!text || !normalizedQuery) return text;
+
+  const normalizedText = normalizeChatSearchText(text);
+  const matchIndex = normalizedText.indexOf(normalizedQuery);
+  if (matchIndex === -1 || text.length <= 120) return text;
+
+  const contextBefore = 36;
+  const contextAfter = 72;
+  const start = Math.max(0, matchIndex - contextBefore);
+  const end = Math.min(
+    text.length,
+    matchIndex + normalizedQuery.length + contextAfter,
+  );
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < text.length ? "..." : "";
+
+  return `${prefix}${text.slice(start, end).trim()}${suffix}`;
+};
+
+export const buildMessagesSearchText = (messages) =>
+  normalizeChatSearchText((messages || []).map(buildMessageSearchText).join(" "));
+
+export const buildConversationSearchText = (conversation) => {
+  const parts = [];
+  const isTeam = conversation?.type === "team";
+
+  addSearchPart(parts, [
+    conversation?.type,
+    conversation?.lastMessage,
+    conversation?.last_message,
+    conversation?.lastMessage?.content,
+    conversation?.last_message?.content,
+  ]);
+
+  if (isTeam) {
+    const team = conversation?.team || {};
+    addSearchPart(parts, [
+      "team",
+      "team chat",
+      team.name,
+      team.teamName,
+      team.team_name,
+      team.description,
+    ]);
+
+    (team.members || conversation?.members || []).forEach((member) => {
+      addUserSearchParts(parts, member?.user || member);
+      addSearchPart(parts, [member?.role, member?.roleName, member?.role_name]);
+    });
+  } else {
+    addSearchPart(parts, ["direct", "dm", "direct message"]);
+    addUserSearchParts(parts, conversation?.partner || conversation?.partnerUser);
+  }
+
+  return normalizeChatSearchText(parts.join(" "));
+};
