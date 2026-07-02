@@ -8,11 +8,12 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
 - Stage 2: Extracted chat search, snippets, preview hydration, and conversation search helpers to `src/utils/chatSearch.js`.
 - Stage 3: Extracted `ConversationHeader.jsx` and `ArchivedTeamBanner.jsx`.
 - Stage 4a: Extracted typing indicator state, typing timeout cleanup, typing user resolution, and active typing names to `src/hooks/useChatTyping.js`.
+- Stage 4b: Extracted Socket.IO event wiring for messages, read status, conversation updates, team membership changes, deleted conversations, message edits/deletes, and notification-triggered team refreshes to `src/hooks/useChatSocketEvents.js`.
 
 ## Current Branch
 
-- `refactor/chat-jsx-decomposition-stage-4-hooks`
-- Latest completed commit: `refactor(chat): extract typing state into custom hook`
+- `refactor/chat-jsx-decomposition-stage-4b-socket-events`
+- Latest completed work: extracted chat socket event wiring to `useChatSocketEvents`.
 
 ## Verification
 
@@ -26,10 +27,6 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
 
 ## Next Recommended Work
 
-- Stage 4b: Extract `useChatSocketEvents`.
-  - Move the large Socket.IO subscription block out of `Chat.jsx`.
-  - Keep the hook API explicit: pass state setters, refs, cache refresh, team-access helpers, and navigation callbacks instead of importing page state indirectly.
-  - Preserve current handling for `message:received`, `message:status`, `conversation:updated`, `team:member_left`, `conversation:deleted`, `team:member_kicked`, `message:deleted`, `message:edited`, and `notification:new`.
 - Stage 4c: Consider `useChatSearchState`.
   - Move chat query state, message search indexing, no-result toast handling, and filtered conversation derivation.
   - Keep `pendingChatSearchTargetRef` integration with message loading explicit.
