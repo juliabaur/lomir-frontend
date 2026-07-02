@@ -66,7 +66,7 @@ const ConversationHeader = ({
                             showDemoOverlay={isSyntheticTeam(teamData)}
                             demoOverlayTextClassName="text-[7px]"
                           />
-                          {(activeConversation?.unreadCount || activeConversation?.unread_count) > 0 && (
+                          {(activeConversation?.unreadCount ?? activeConversation?.unread_count ?? 0) > 0 && (
                             <CountBadge
                               count={activeConversation.unreadCount ?? activeConversation.unread_count}
                               className="absolute -top-1 -left-2 z-10"
@@ -93,7 +93,7 @@ const ConversationHeader = ({
                             demoOverlayTextClassName="text-[7px]"
                             demoOverlayTextTranslateClassName="-translate-y-[2px]"
                           />
-                          {(activeConversation?.unreadCount || activeConversation?.unread_count) > 0 && (
+                          {(activeConversation?.unreadCount ?? activeConversation?.unread_count ?? 0) > 0 && (
                             <CountBadge
                               count={activeConversation.unreadCount ?? activeConversation.unread_count}
                               className="absolute -top-1 -left-2 z-10"
