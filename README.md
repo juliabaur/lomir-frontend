@@ -249,6 +249,7 @@ Lomir-frontend/
 │   │   ├── useClientPagination.js  # Client-side pagination state for lists
 │   │   ├── useSocketEvents.js      # Subscribe to a set of Socket.IO events with React-safe cleanup
 │   │   ├── useChatTyping.js        # Chat typing indicator state, timeout cleanup, and user-name resolution
+│   │   ├── useChatSocketEvents.js  # Chat Socket.IO event wiring for messages, read status, membership, and conversation updates
 │   │   ├── useAwardModals.js       # Badge award modal state management (user profile context)
 │   │   ├── useTeamAwardModals.js   # Badge award modal state management (team context)
 │   │   └── useTheme.js             # Theme toggle state
@@ -366,7 +367,7 @@ The chat page supports both direct (1-to-1) and team group conversations.
 - Messages are delivered in real time via Socket.IO
 - Typing indicators and read receipts are shown per conversation
 - Messages can be replied to, edited, and soft-deleted; deleted messages show a placeholder
-- Typing indicator state is isolated in `useChatTyping`; `Chat.jsx` still owns the broader socket-event wiring, conversation cache updates, and message loading orchestration
+- Typing indicator state is isolated in `useChatTyping`; Socket.IO event wiring is isolated in `useChatSocketEvents`; `Chat.jsx` still owns conversation selection, message loading, search state, and send/edit/delete actions
 
 **Archived (deleted) team chats**
 - When an owner deletes a team that still has other members, the team is archived (scheduled for deletion) and the chat stays open as a "farewell" window — remaining members can still read and post until they leave or the grace period (14 days) elapses
