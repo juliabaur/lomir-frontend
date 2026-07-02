@@ -9,11 +9,12 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
 - Stage 3: Extracted `ConversationHeader.jsx` and `ArchivedTeamBanner.jsx`.
 - Stage 4a: Extracted typing indicator state, typing timeout cleanup, typing user resolution, and active typing names to `src/hooks/useChatTyping.js`.
 - Stage 4b: Extracted Socket.IO event wiring for messages, read status, conversation updates, team membership changes, deleted conversations, message edits/deletes, and notification-triggered team refreshes to `src/hooks/useChatSocketEvents.js`.
+- Stage 4c: Extracted chat search query state, message search indexing, no-result toast handling, filtered conversation derivation, and search-panel visibility to `src/hooks/useChatSearchState.js`.
 
 ## Current Branch
 
-- `refactor/chat-jsx-decomposition-stage-4b-socket-events`
-- Latest completed commit: `refactor(chat): extract socket event wiring into hook` (`d725245`).
+- `refactor/chat-jsx-decomposition-stage-4c-search-state`
+- Latest completed work: extracted chat search state and message indexing to `useChatSearchState`.
 
 ## Verification
 
@@ -28,12 +29,12 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
   - Read status updates still render.
   - Message edit/delete socket updates still render.
   - Team chat membership/notification refresh paths still behave as expected.
+  - Chat search filters by conversation metadata and message snippets.
+  - Search-result selection still reveals and highlights the matching message.
+  - No-result feedback still appears and can be dismissed.
 
 ## Next Recommended Work
 
-- Stage 4c: Consider `useChatSearchState`.
-  - Move chat query state, message search indexing, no-result toast handling, and filtered conversation derivation.
-  - Keep `pendingChatSearchTargetRef` integration with message loading explicit.
 - Stage 4d: Consider `useActiveChatConversation`.
   - Move conversation fetch/load, socket join/leave, read marking, highlighted message loading, and earlier-message pagination.
 
