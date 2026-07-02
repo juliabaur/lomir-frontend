@@ -248,6 +248,7 @@ Lomir-frontend/
 │   │   ├── useMyTeamsSort.js       # Sort state for MyTeams page
 │   │   ├── useClientPagination.js  # Client-side pagination state for lists
 │   │   ├── useSocketEvents.js      # Subscribe to a set of Socket.IO events with React-safe cleanup
+│   │   ├── useChatTyping.js        # Chat typing indicator state, timeout cleanup, and user-name resolution
 │   │   ├── useAwardModals.js       # Badge award modal state management (user profile context)
 │   │   ├── useTeamAwardModals.js   # Badge award modal state management (team context)
 │   │   └── useTheme.js             # Theme toggle state
@@ -365,6 +366,7 @@ The chat page supports both direct (1-to-1) and team group conversations.
 - Messages are delivered in real time via Socket.IO
 - Typing indicators and read receipts are shown per conversation
 - Messages can be replied to, edited, and soft-deleted; deleted messages show a placeholder
+- Typing indicator state is isolated in `useChatTyping`; `Chat.jsx` still owns the broader socket-event wiring, conversation cache updates, and message loading orchestration
 
 **Archived (deleted) team chats**
 - When an owner deletes a team that still has other members, the team is archived (scheduled for deletion) and the chat stays open as a "farewell" window — remaining members can still read and post until they leave or the grace period (14 days) elapses
@@ -411,6 +413,7 @@ The chat page supports both direct (1-to-1) and team group conversations.
 
 - **Backend repo:** [Lomir-backend](https://github.com/KasparSinitsin/Lomir-backend)
 - **Account deletion spec:** Backend repo → `docs/USER_DELETION_SPEC.md`
+- **Chat refactor tracker:** `docs/CHAT_REFACTOR_TODO.md`
 
 ---
 
