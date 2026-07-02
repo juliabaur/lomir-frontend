@@ -23,6 +23,7 @@ import { messageService } from "../services/messageService";
 import socketService from "../services/socketService";
 import useChatTyping from "../hooks/useChatTyping";
 import useChatSocketEvents from "../hooks/useChatSocketEvents";
+import useChatSearchState from "../hooks/useChatSearchState";
 import { userService } from "../services/userService";
 import { isQuietError } from "../services/api";
 import { teamService } from "../services/teamService";
@@ -51,20 +52,12 @@ import {
   getConversationUpdatedAt,
 } from "../utils/chatHelpers";
 import {
-  CHAT_SEARCH_PAGE_SIZE,
   CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION,
   dedupeConversations,
-  getConversationSearchKey,
-  normalizeChatSearchText,
-  countChatSearchMatches,
   buildMessageSearchText,
   getNotificationEventHighlightIds,
   buildConversationLastMessagePreview,
   hydrateConversationPreviews,
-  buildMessageSearchSnippets,
-  buildLatestMatchPreview,
-  buildMessagesSearchText,
-  buildConversationSearchText,
 } from "../utils/chatSearch";
 
 // Stable empty fallback so the conversations query's default never changes
@@ -126,21 +119,22 @@ const Chat = () => {
     useState(false);
   const [isActiveConversationVisible, setIsActiveConversationVisible] =
     useState(true);
-  const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [chatMessageSearchIndex, setChatMessageSearchIndex] = useState({});
-  const [chatMessageSearchSnippets, setChatMessageSearchSnippets] = useState({});
-  const [searchingChatMessages, setSearchingChatMessages] = useState(false);
-  const [searchNoResultsToastQuery, setSearchNoResultsToastQuery] = useState(null);
-  const searchNoResultsQueryRef = useRef(null);
-  const [searchChatVisible, setSearchChatVisible] = useState(false);
   const messagesContainerRef = useRef(null);
   const pendingScrollAdjustmentRef = useRef(null);
   const conversationsRef = useRef([]);
   const activeConversationRef = useRef(null);
   const messagesRef = useRef([]);
-  const chatSearchLoadingKeysRef = useRef(new Set());
   const pendingChatSearchTargetRef = useRef(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
+
+  // Conversation type (used for read-only rendering)
+  const conversationType =
+    activeConversation?.type ||
+    new URLSearchParams(window.location.search).get("type") ||
+    "direct";
+  const handleChatSearchQueryChange = useCallback(() => {
+    setHighlightMessageIds([]);
+  }, []);
   const {
     activeTypingUsers,
     clearTypingUsers,
@@ -150,6 +144,28 @@ const Chat = () => {
     conversationId,
     currentUser: user,
     activeConversation,
+  });
+  const {
+    chatSearchEmptyState,
+    chatSearchQuery,
+    filteredConversations,
+    hideChatDuringSearch,
+    isChatSearchActive,
+    isNoSearchResults,
+    normalizedChatSearchQuery,
+    revealSearchChat,
+    searchingChatMessages,
+    searchNoResultsToastQuery,
+    setChatSearchQuery,
+    setSearchNoResultsToastQuery,
+    totalSearchMatches,
+  } = useChatSearchState({
+    conversationId,
+    conversationType,
+    conversations,
+    isAuthenticated,
+    messages,
+    onSearchQueryChange: handleChatSearchQueryChange,
   });
 
   // ---- Message de-duplication (focus: ownership/system duplicates) ----
@@ -207,12 +223,6 @@ const Chat = () => {
     }
     return out;
   };
-
-  // Conversation type (used for read-only rendering)
-  const conversationType =
-    activeConversation?.type ||
-    new URLSearchParams(window.location.search).get("type") ||
-    "direct";
 
   const conversationPartner =
     conversationType === "direct"
@@ -460,11 +470,6 @@ const Chat = () => {
     !isActiveConversationVisible;
   const showEmptyConversationState =
     !loading && conversations.length === 0 && !conversationId;
-  const normalizedChatSearchQuery = useMemo(
-    () => normalizeChatSearchText(chatSearchQuery.trim()),
-    [chatSearchQuery],
-  );
-  const isChatSearchActive = normalizedChatSearchQuery.length > 0;
 
   useEffect(() => {
     setReplyingTo(null);
@@ -524,219 +529,6 @@ const Chat = () => {
     refreshActiveTeamMembership,
     user?.id,
   ]);
-
-  const fetchConversationSearchText = useCallback(async (conversation) => {
-    const conversationType = conversation?.type || "direct";
-    const allMessages = [];
-    let before;
-    let hasMore = true;
-
-    while (
-      hasMore &&
-      allMessages.length < CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION
-    ) {
-      const remaining =
-        CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION - allMessages.length;
-      const response = await messageService.getMessages(
-        conversation.id,
-        conversationType,
-        {
-          before,
-          limit: Math.min(CHAT_SEARCH_PAGE_SIZE, remaining),
-        },
-      );
-      const pageMessages = Array.isArray(response?.data) ? response.data : [];
-
-      if (pageMessages.length === 0) {
-        break;
-      }
-
-      allMessages.push(...pageMessages);
-      hasMore = Boolean(response?.hasMore);
-      before = pageMessages[0]?.id;
-
-      if (!before) {
-        break;
-      }
-    }
-
-    return {
-      text: buildMessagesSearchText(allMessages),
-      snippets: buildMessageSearchSnippets(allMessages),
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!conversationId || messages.length === 0) return;
-
-    const key = `${conversationType}:${conversationId}`;
-    const activeMessagesSearchText = buildMessagesSearchText(messages);
-
-    setChatMessageSearchIndex((prev) => ({
-      ...prev,
-      [key]: normalizeChatSearchText(
-        `${prev[key] || ""} ${activeMessagesSearchText}`,
-      ),
-    }));
-    setChatMessageSearchSnippets((prev) => ({
-      ...prev,
-      [key]: buildMessageSearchSnippets(messages),
-    }));
-  }, [conversationId, conversationType, messages]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !isChatSearchActive || conversations.length === 0) {
-      setSearchingChatMessages(false);
-      return;
-    }
-
-    const missingConversations = conversations.filter((conversation) => {
-      const key = getConversationSearchKey(conversation);
-      return (
-        !chatMessageSearchIndex[key] &&
-        !chatSearchLoadingKeysRef.current.has(key)
-      );
-    });
-
-    if (missingConversations.length === 0) {
-      setSearchingChatMessages(chatSearchLoadingKeysRef.current.size > 0);
-      return;
-    }
-
-    missingConversations.forEach((conversation) => {
-      chatSearchLoadingKeysRef.current.add(getConversationSearchKey(conversation));
-    });
-    setSearchingChatMessages(true);
-
-    Promise.allSettled(
-      missingConversations.map(async (conversation) => ({
-        key: getConversationSearchKey(conversation),
-        result: await fetchConversationSearchText(conversation),
-      })),
-    ).then((results) => {
-      setChatMessageSearchIndex((prev) => {
-        const next = { ...prev };
-
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            next[result.value.key] = result.value.result.text || " ";
-            return;
-          }
-
-          next[getConversationSearchKey(missingConversations[index])] = " ";
-        });
-
-        return next;
-      });
-      setChatMessageSearchSnippets((prev) => {
-        const next = { ...prev };
-
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            next[result.value.key] = result.value.result.snippets || [];
-            return;
-          }
-
-          next[getConversationSearchKey(missingConversations[index])] = [];
-        });
-
-        return next;
-      });
-
-      results.forEach((result, index) => {
-        const key =
-          result.status === "fulfilled"
-            ? result.value.key
-            : getConversationSearchKey(missingConversations[index]);
-        chatSearchLoadingKeysRef.current.delete(key);
-      });
-      setSearchingChatMessages(chatSearchLoadingKeysRef.current.size > 0);
-    });
-  }, [
-    chatMessageSearchIndex,
-    conversations,
-    fetchConversationSearchText,
-    isAuthenticated,
-    isChatSearchActive,
-  ]);
-
-  const filteredConversations = useMemo(() => {
-    if (!isChatSearchActive) return conversations;
-
-    return conversations
-      .map((conversation) => {
-        const key = getConversationSearchKey(conversation);
-        const conversationSearchText = buildConversationSearchText(conversation);
-        const messageSearchText = chatMessageSearchIndex[key] || "";
-        const searchMatchCount =
-          countChatSearchMatches(
-            conversationSearchText,
-            normalizedChatSearchQuery,
-          ) +
-          countChatSearchMatches(messageSearchText, normalizedChatSearchQuery);
-        const matchedMessageSnippet = [
-          ...(chatMessageSearchSnippets[key] || []),
-        ]
-          .reverse()
-          .find((snippet) =>
-            normalizeChatSearchText(snippet.text).includes(
-              normalizedChatSearchQuery,
-            ),
-          );
-        const nextConversation = matchedMessageSnippet
-          ? {
-              ...conversation,
-              searchMatchPreview: buildLatestMatchPreview(
-                matchedMessageSnippet.text,
-                normalizedChatSearchQuery,
-              ),
-              searchMatchContent: matchedMessageSnippet.content,
-              searchMatchMessageId: matchedMessageSnippet.id,
-              searchMatchCreatedAt: matchedMessageSnippet.timestamp,
-            }
-          : conversation;
-
-        return {
-          conversation: nextConversation,
-          searchMatchCount,
-        };
-      })
-      .filter(({ searchMatchCount }) => searchMatchCount > 0)
-      .sort((a, b) => {
-        if (b.searchMatchCount !== a.searchMatchCount) {
-          return b.searchMatchCount - a.searchMatchCount;
-        }
-
-        const aDate = getConversationUpdatedAt(a.conversation)?.getTime() ?? 0;
-        const bDate = getConversationUpdatedAt(b.conversation)?.getTime() ?? 0;
-        return bDate - aDate;
-      })
-      .map(({ conversation, searchMatchCount }) => ({ ...conversation, searchMatchCount }));
-  }, [
-    chatMessageSearchIndex,
-    chatMessageSearchSnippets,
-    conversations,
-    isChatSearchActive,
-    normalizedChatSearchQuery,
-  ]);
-
-  useEffect(() => {
-    if (isChatSearchActive && !searchingChatMessages && filteredConversations.length === 0) {
-      const query = chatSearchQuery.trim();
-      if (searchNoResultsQueryRef.current !== query) {
-        searchNoResultsQueryRef.current = query;
-        setSearchNoResultsToastQuery(query);
-      }
-    } else {
-      searchNoResultsQueryRef.current = null;
-      setSearchNoResultsToastQuery(null);
-    }
-  }, [isChatSearchActive, searchingChatMessages, filteredConversations.length, chatSearchQuery]);
-
-  useEffect(() => {
-    setSearchChatVisible(false);
-    setHighlightMessageIds([]);
-  }, [chatSearchQuery]);
 
   useEffect(() => {
     setIsActiveConversationVisible(true);
@@ -1836,7 +1628,7 @@ const Chat = () => {
 
     // When search is active, reveal the chat panel
     if (isChatSearchActive) {
-      setSearchChatVisible(true);
+      revealSearchChat();
     }
 
     // Navigate with type parameter
@@ -1872,18 +1664,12 @@ const Chat = () => {
       icon: <LogOut size={16} />,
     },
   }[pendingChatActionType];
-  const isNoSearchResults =
-    isChatSearchActive && !searchingChatMessages && filteredConversations.length === 0;
-  const hideChatDuringSearch = isChatSearchActive && !searchChatVisible;
   const shouldShowConversationPanel =
     !showEmptyConversationState &&
     !hideChatDuringSearch &&
     Boolean(conversationId) &&
     showChatView &&
     (Boolean(activeConversation) || loadingMessages);
-  const totalSearchMatches = isChatSearchActive
-    ? filteredConversations.reduce((sum, conv) => sum + (conv.searchMatchCount || 0), 0)
-    : 0;
   const chatSearchPlaceholder = "Search chats...";
   const chatSearchInputWidth = `${Math.max(
     chatSearchQuery.length,
@@ -1928,15 +1714,6 @@ const Chat = () => {
       )}
     </div>
   );
-  const chatSearchEmptyState =
-    isChatSearchActive && searchingChatMessages
-      ? {
-          title: "Searching chats...",
-          description: `Looking through message history for "${chatSearchQuery.trim()}".`,
-          showActions: false,
-        }
-      : null;
-
   return (
     <PageContainer
       title="Chats"
