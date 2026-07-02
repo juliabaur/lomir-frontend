@@ -23,6 +23,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { messageService } from "../services/messageService";
 import socketService from "../services/socketService";
 import useSocketEvents from "../hooks/useSocketEvents";
+import useChatTyping from "../hooks/useChatTyping";
 import { userService } from "../services/userService";
 import { isQuietError } from "../services/api";
 import { teamService } from "../services/teamService";
@@ -37,7 +38,6 @@ import TeamAvatar from "../components/teams/TeamAvatar";
 import TeamDetailsModal from "../components/teams/TeamDetailsModal";
 import UserDetailsModal from "../components/users/UserDetailsModal";
 import { DEMO_PROFILE_TOOLTIP, DEMO_TEAM_TOOLTIP } from "../utils/userHelpers";
-import { formatDisplayName } from "../utils/nameFormatters";
 import {
   normalizeTimestampToDate,
   formatArchiveTimeRemaining,
@@ -46,9 +46,6 @@ import {
 import { getMessageConversationTarget } from "../utils/messageNotificationUtils";
 import {
   getConversationPartnerId,
-  resolveTypingUserId,
-  resolveTypingDisplayName,
-  resolveConversationUser,
   isActiveTeamMemberRow,
   isUserTeamMember,
   getPayloadTeamId,
@@ -117,8 +114,6 @@ const Chat = () => {
   const [replyingTo, setReplyingTo] = useState(null);
   const [error, setError] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState({});
-  const [users, setUsers] = useState({});
   const [highlightMessageIds, setHighlightMessageIds] = useState([]);
   const [isTeamArchived, setIsTeamArchived] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -143,7 +138,6 @@ const Chat = () => {
   const [searchNoResultsToastQuery, setSearchNoResultsToastQuery] = useState(null);
   const searchNoResultsQueryRef = useRef(null);
   const [searchChatVisible, setSearchChatVisible] = useState(false);
-  const typingTimeoutRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const pendingScrollAdjustmentRef = useRef(null);
   const conversationsRef = useRef([]);
@@ -152,6 +146,16 @@ const Chat = () => {
   const chatSearchLoadingKeysRef = useRef(new Set());
   const pendingChatSearchTargetRef = useRef(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const {
+    activeTypingUsers,
+    clearTypingUsers,
+    handleTyping,
+    handleTypingUpdate,
+  } = useChatTyping({
+    conversationId,
+    currentUser: user,
+    activeConversation,
+  });
 
   // ---- Message de-duplication (focus: ownership/system duplicates) ----
   const toMinuteBucket = (isoOrDate) => {
@@ -311,7 +315,7 @@ const Chat = () => {
       ) {
         setActiveConversation(null);
         setMessages([]);
-        setTypingUsers({});
+        clearTypingUsers();
         setReplyingTo(null);
         setHighlightMessageIds([]);
         setHasMoreMessages(false);
@@ -319,7 +323,13 @@ const Chat = () => {
         navigate("/chat", { replace: true });
       }
     },
-    [conversationId, navigate, searchParams, setConversations],
+    [
+      clearTypingUsers,
+      conversationId,
+      navigate,
+      searchParams,
+      setConversations,
+    ],
   );
 
   const refreshActiveTeamMembership = useCallback(
@@ -784,7 +794,7 @@ const Chat = () => {
       setError("This conversation is no longer available.");
       setActiveConversation(null);
       setMessages([]);
-      setTypingUsers({});
+      clearTypingUsers();
       setHighlightMessageIds([]);
       setHasMoreMessages(false);
       navigate("/chat", { replace: true });
@@ -794,7 +804,13 @@ const Chat = () => {
     // re-run — and refetch the whole conversation list — on every chat switch.
     // This effect must only react to block/unblock state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockedRelationshipIds, isAuthenticated, isBlockedId, refreshConversationList]);
+  }, [
+    blockedRelationshipIds,
+    clearTypingUsers,
+    isAuthenticated,
+    isBlockedId,
+    refreshConversationList,
+  ]);
 
   // Surface a load failure from the conversations query (matches the old
   // fetch-effect error message).
@@ -1531,51 +1547,6 @@ const Chat = () => {
       }
     };
 
-    // Handle typing indicators
-    const handleTypingUpdate = async (data) => {
-      if (String(data.conversationId) !== String(conversationId)) {
-        return;
-      }
-
-      const typingUserId = resolveTypingUserId(data);
-      if (!typingUserId) {
-        return;
-      }
-
-      let displayName = resolveTypingDisplayName(data) || "User";
-      const conversationUser = resolveConversationUser(activeConversation, typingUserId);
-
-      if (conversationUser) {
-        displayName = formatDisplayName(conversationUser);
-      } else if (users[typingUserId]) {
-        displayName = formatDisplayName(users[typingUserId]);
-      } else if (data.isTyping) {
-        try {
-          const userData = await userService.getUserById(typingUserId);
-          setUsers((prev) => ({ ...prev, [typingUserId]: userData }));
-          displayName = formatDisplayName(userData);
-        } catch (error) {
-          console.error("Error fetching user for typing:", error);
-          displayName = resolveTypingDisplayName(data) || "User";
-        }
-      }
-
-      setTypingUsers((prev) => {
-        const updated = {
-          ...prev,
-          [typingUserId]: data.isTyping ? displayName : null,
-        };
-
-        Object.keys(updated).forEach((key) => {
-          if (updated[key] === null) {
-            delete updated[key];
-          }
-        });
-
-        return updated;
-      });
-    };
-
     // Handle message status updates
     const handleMessageStatus = (data) => {
       if (String(data.conversationId) === String(conversationId)) {
@@ -1726,7 +1697,7 @@ const Chat = () => {
       setError("This conversation is no longer available.");
       setActiveConversation(null);
       setMessages([]);
-      setTypingUsers({});
+      clearTypingUsers();
       setHighlightMessageIds([]);
       setHasMoreMessages(false);
       navigate("/chat", { replace: true });
@@ -1832,10 +1803,10 @@ const Chat = () => {
     refreshConversationList,
     revokeTeamChatAccess,
     activeConversation,
+    handleTypingUpdate,
     searchParams,
     user?.id,
     user?.username,
-    users,
   ]);
 
   const handleHeaderTeamClick = (e) => {
@@ -1907,7 +1878,7 @@ const Chat = () => {
     if (String(conversationId) === String(teamId)) {
       setActiveConversation(null);
       setMessages([]);
-      setTypingUsers({});
+      clearTypingUsers();
       setReplyingTo(null);
       setShowChatView(false);
       setIsTeamModalOpen(false);
@@ -2323,30 +2294,7 @@ const Chat = () => {
     setReplyingTo(null);
 
     // Clear typing indicator
-    clearTimeout(typingTimeoutRef.current);
-    socketService.sendTypingStop(conversationId, type);
-  };
-
-  const handleTyping = (isTyping, type = "direct") => {
-    if (!conversationId) return;
-
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    if (isTyping) {
-      socketService.sendTypingStart(conversationId, type, {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-      });
-      typingTimeoutRef.current = setTimeout(() => {
-        socketService.sendTypingStop(conversationId, type);
-      }, 3000);
-    } else {
-      socketService.sendTypingStop(conversationId, type);
-    }
+    handleTyping(false, type);
   };
 
   const selectConversation = (id) => {
@@ -2395,11 +2343,6 @@ const Chat = () => {
     // Navigate with type parameter
     navigate(`/chat/${id}?type=${type}`);
   };
-
-  // Get active typing users for current conversation
-  const activeTypingUsers = Object.entries(typingUsers)
-    .filter(([userId, username]) => userId !== user?.id && username)
-    .map(([, username]) => username);
 
   const pendingChatActionType = pendingChatAction?.type;
   const pendingChatActionConfig = {
