@@ -416,8 +416,6 @@ The chat page supports both direct (1-to-1) and team group conversations.
 ## Related
 
 - **Backend repo:** [Lomir-backend](https://github.com/KasparSinitsin/Lomir-backend)
-- **Account deletion spec:** Backend repo → `docs/USER_DELETION_SPEC.md`
-- **Chat refactor tracker:** `docs/CHAT_REFACTOR_TODO.md`
 
 ---
 
