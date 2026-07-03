@@ -330,10 +330,21 @@ const hasConversationPreview = (conversation) => {
   );
 };
 
+const getConversationType = (conversation) => conversation?.type || "direct";
+
+const shouldKeepHydratedConversation = (conversation, previewByKey) => {
+  const type = getConversationType(conversation);
+
+  if (conversation?.isVirtual || type !== "direct") return true;
+  if (hasConversationPreview(conversation)) return true;
+
+  return previewByKey.has(`${type}:${String(conversation.id)}`);
+};
+
 // Fill in last-message previews for conversations the list endpoint returned
 // without one, by fetching the latest message per conversation. Pure: returns a
-// new list with previews merged in (or the input unchanged when nothing needs
-// hydrating), so it can run inside the conversations queryFn.
+// new list with previews merged in, and drops persistent empty direct chats so
+// only DMs with at least one message stay in the conversation list.
 export const hydrateConversationPreviews = async (conversationList) => {
   const conversationsToHydrate = (conversationList || []).filter(
     (conversation) =>
@@ -375,24 +386,26 @@ export const hydrateConversationPreviews = async (conversationList) => {
     );
   });
 
-  if (previewByKey.size === 0) return conversationList || [];
+  return (conversationList || [])
+    .filter((conversation) =>
+      shouldKeepHydratedConversation(conversation, previewByKey),
+    )
+    .map((conversation) => {
+      const type = getConversationType(conversation);
+      const hydratedPreview = previewByKey.get(
+        `${type}:${String(conversation.id)}`,
+      );
 
-  return (conversationList || []).map((conversation) => {
-    const type = conversation.type || "direct";
-    const hydratedPreview = previewByKey.get(
-      `${type}:${String(conversation.id)}`,
-    );
+      if (!hydratedPreview || hasConversationPreview(conversation)) {
+        return conversation;
+      }
 
-    if (!hydratedPreview || hasConversationPreview(conversation)) {
-      return conversation;
-    }
-
-    return {
-      ...conversation,
-      lastMessage: hydratedPreview.preview,
-      updatedAt: hydratedPreview.updatedAt || conversation.updatedAt,
-    };
-  });
+      return {
+        ...conversation,
+        lastMessage: hydratedPreview.preview,
+        updatedAt: hydratedPreview.updatedAt || conversation.updatedAt,
+      };
+    });
 };
 
 const getMessageSearchTimestamp = (message) => {
