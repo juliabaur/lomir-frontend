@@ -251,6 +251,7 @@ Lomir-frontend/
 │   │   ├── useChatTyping.js        # Chat typing indicator state, timeout cleanup, and user-name resolution
 │   │   ├── useChatSocketEvents.js  # Chat Socket.IO event wiring for messages, read status, membership, and conversation updates
 │   │   ├── useChatSearchState.js   # Chat search query state, message indexing, filtering, and no-result feedback
+│   │   ├── useActiveChatConversation.js # Active chat loading, join/read marking, highlights, and earlier-message pagination
 │   │   ├── useAwardModals.js       # Badge award modal state management (user profile context)
 │   │   ├── useTeamAwardModals.js   # Badge award modal state management (team context)
 │   │   └── useTheme.js             # Theme toggle state
@@ -368,7 +369,8 @@ The chat page supports both direct (1-to-1) and team group conversations.
 - Messages are delivered in real time via Socket.IO
 - Typing indicators and read receipts are shown per conversation
 - Messages can be replied to, edited, and soft-deleted; deleted messages show a placeholder
-- Typing indicator state is isolated in `useChatTyping`; Socket.IO event wiring is isolated in `useChatSocketEvents`; chat search state and message indexing are isolated in `useChatSearchState`; `Chat.jsx` still owns conversation selection, message loading, and send/edit/delete actions
+- Typing indicator state is isolated in `useChatTyping`; Socket.IO event wiring is isolated in `useChatSocketEvents`; chat search state and message indexing are isolated in `useChatSearchState`; active conversation loading and earlier-message pagination are isolated in `useActiveChatConversation`; `Chat.jsx` still owns conversation selection and send/edit/delete actions
+- The conversation list is cached per authenticated user, empty direct chats stay transient until the first message is sent, and revoked/deleted team access is removed from the list without repeated failing fetches
 
 **Archived (deleted) team chats**
 - When an owner deletes a team that still has other members, the team is archived (scheduled for deletion) and the chat stays open as a "farewell" window — remaining members can still read and post until they leave or the grace period (14 days) elapses

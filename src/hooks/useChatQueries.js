@@ -5,6 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 // place via queryClient.setQueryData as socket events arrive. Invalidate this
 // key to re-fetch the whole list.
 export const conversationsQueryKey = ["chat", "conversations"];
+export const getConversationsQueryKey = (userId) => [
+  ...conversationsQueryKey,
+  userId ?? "anonymous",
+];
 
 /**
  * The current user's conversation list. The query function is supplied by the
@@ -12,9 +16,9 @@ export const conversationsQueryKey = ["chat", "conversations"];
  * Chat.jsx (slated to move into chatHelpers.js with the Tier 2 split). Stays
  * disabled until the user is authenticated.
  */
-export const useConversations = (queryFn, enabled) =>
+export const useConversations = (queryFn, enabled, userId) =>
   useQuery({
-    queryKey: conversationsQueryKey,
+    queryKey: getConversationsQueryKey(userId),
     queryFn,
     enabled,
     // The list is kept current by socket handlers (setQueryData) and explicit

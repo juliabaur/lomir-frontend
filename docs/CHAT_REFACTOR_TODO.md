@@ -1,6 +1,6 @@
 # Chat Refactor To-do
 
-Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work on the frontend.
+Status as of 2026-07-03. This tracks the focused `Chat.jsx` decomposition work on the frontend.
 
 ## Completed
 
@@ -10,11 +10,12 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
 - Stage 4a: Extracted typing indicator state, typing timeout cleanup, typing user resolution, and active typing names to `src/hooks/useChatTyping.js`.
 - Stage 4b: Extracted Socket.IO event wiring for messages, read status, conversation updates, team membership changes, deleted conversations, message edits/deletes, and notification-triggered team refreshes to `src/hooks/useChatSocketEvents.js`.
 - Stage 4c: Extracted chat search query state, message search indexing, no-result toast handling, filtered conversation derivation, and search-panel visibility to `src/hooks/useChatSearchState.js`.
+- Stage 4d: Extracted active conversation loading, team/direct conversation hydration, socket join/leave, read marking, highlight handling, and earlier-message pagination to `src/hooks/useActiveChatConversation.js`; tightened 403/404 team access cleanup, empty direct-chat filtering, and user-scoped conversation cache keys.
 
 ## Current Branch
 
-- `refactor/chat-jsx-decomposition-stage-4c-search-state`
-- Latest completed work: extracted chat search state and message indexing to `useChatSearchState`.
+- `refactor/chat-jsx-decomposition-stage-4d-active-conversation`
+- Latest completed work: extracted active conversation loading and earlier-message pagination to `useActiveChatConversation`, with Stage 4d follow-up fixes for stale team access, empty DMs, and account-switch cache isolation.
 
 ## Verification
 
@@ -32,11 +33,18 @@ Status as of 2026-07-02. This tracks the focused `Chat.jsx` decomposition work o
   - Chat search filters by conversation metadata and message snippets.
   - Search-result selection still reveals and highlights the matching message.
   - No-result feedback still appears and can be dismissed.
+- Active direct and team conversations still load messages and details.
+- Socket join/read marking still happens after conversation load.
+- Earlier-message pagination preserves scroll position.
+- Notification/search highlights still reveal the target message.
+- Revoked/deleted team conversations are removed from the list without repeated 403/404 fetch loops.
+- Empty direct chats remain transient while actively opened but are not kept in the persistent conversation list.
+- Switching accounts in the same browser uses a user-scoped conversation cache instead of reusing another user's chat list.
 
 ## Next Recommended Work
 
-- Stage 4d: Consider `useActiveChatConversation`.
-  - Move conversation fetch/load, socket join/leave, read marking, highlighted message loading, and earlier-message pagination.
+- Review remaining `Chat.jsx` responsibilities and decide whether Stage 5 should focus on send/edit/delete actions or team access helpers.
+- Consider a short pause before further extraction: Stage 4a-4d moved the highest-value state/effect clusters out of `Chat.jsx`.
 
 ## Guardrails
 
