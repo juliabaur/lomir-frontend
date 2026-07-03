@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchTeamById } from "../hooks/useTeamQueries";
 import {
   useConversations,
   conversationsQueryKey,
@@ -28,6 +27,7 @@ import socketService from "../services/socketService";
 import useChatTyping from "../hooks/useChatTyping";
 import useChatSocketEvents from "../hooks/useChatSocketEvents";
 import useChatSearchState from "../hooks/useChatSearchState";
+import useChatTeamAccess from "../hooks/useChatTeamAccess";
 import useActiveChatConversation from "../hooks/useActiveChatConversation";
 import { userService } from "../services/userService";
 import { isQuietError } from "../services/api";
@@ -52,7 +52,6 @@ import {
   getConversationPartnerId,
   isActiveTeamMemberRow,
   isUserTeamMember,
-  mergeTeamDetailsIntoConversationData,
   isArchivedTeamData,
   getConversationUpdatedAt,
 } from "../utils/chatHelpers";
@@ -296,163 +295,31 @@ const Chat = () => {
   const canSendInActiveConversation =
     Boolean(activeConversation) && isCurrentUserActiveTeamMember;
 
-  const fetchTeamDetails = useCallback(
-    (teamId, { force = false } = {}) => {
-      if (!teamId) return Promise.resolve(null);
-      // React Query handles caching and in-flight request dedup that this
-      // component used to track by hand (see fetchTeamById).
-      return fetchTeamById(queryClient, teamId, { force });
-    },
-    [queryClient],
-  );
-
-  const revokeTeamChatAccess = useCallback(
-    (teamId, message = "You no longer have access to this team chat.") => {
-      if (!teamId) return;
-
-      socketService.leaveConversation(teamId, "team");
-      setError(message);
-      setConversations((prev) =>
-        prev.filter(
-          (conversation) =>
-            !(
-              conversation.type === "team" &&
-              String(conversation.id) === String(teamId)
-            ),
-        ),
-      );
-
-      const activeTeamId =
-        activeConversationRef.current?.team?.id ?? activeConversationRef.current?.id;
-
-      if (
-        String(activeTeamId) === String(teamId) ||
-        (String(conversationId) === String(teamId) &&
-          (searchParams.get("type") || "direct") === "team")
-      ) {
-        setActiveConversation(null);
-        setMessages([]);
-        clearTypingUsers();
-        setReplyingTo(null);
-        setHighlightMessageIds([]);
-        setHasMoreMessages(false);
-        setShowChatView(false);
-        navigate("/chat", { replace: true });
-      }
-    },
-    [
-      clearTypingUsers,
-      conversationId,
-      navigate,
-      searchParams,
-      setConversations,
-    ],
-  );
-
-  const refreshActiveTeamMembership = useCallback(
-    async (teamId) => {
-      if (!teamId || !user?.id) return true;
-
-      let teamPayload = null;
-
-      try {
-        const conversationResponse = await messageService.getConversationById(
-          teamId,
-          "team",
-        );
-        teamPayload = conversationResponse?.data?.team || null;
-      } catch (conversationError) {
-        if (
-          conversationError.response?.status === 404 ||
-          conversationError.response?.status === 403
-        ) {
-          revokeTeamChatAccess(teamId);
-          return false;
-        }
-
-        throw conversationError;
-      }
-
-      if (!Array.isArray(teamPayload?.members)) {
-        try {
-          teamPayload = await fetchTeamDetails(teamId, { force: true });
-        } catch (teamError) {
-          if (teamError.response?.status === 404 && isArchivedTeamData(teamPayload)) {
-            return true;
-          }
-
-          throw teamError;
-        }
-      }
-
-      if (!isUserTeamMember(teamPayload.members, user.id)) {
-        revokeTeamChatAccess(teamId);
-        return false;
-      }
-
-      setActiveConversation((prev) => {
-        if (
-          !prev ||
-          prev.type !== "team" ||
-          String(prev.team?.id ?? prev.id) !== String(teamId)
-        ) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          team: mergeTeamDetailsIntoConversationData(prev, teamPayload).team,
-        };
-      });
-
-      return true;
-    },
-    [fetchTeamDetails, revokeTeamChatAccess, user?.id],
-  );
-
-  const hydrateTeamConversationDetails = useCallback(
-    async (conversationDetails, teamId) => {
-      if (!conversationDetails?.data || !teamId) return false;
-
-      if (isArchivedTeamData(conversationDetails.data.team)) {
-        setIsTeamArchived(true);
-
-        if (Array.isArray(conversationDetails.data.team?.members)) {
-          if (!isUserTeamMember(conversationDetails.data.team.members, user?.id)) {
-            revokeTeamChatAccess(teamId);
-            setLoadingMessages(false);
-            return true;
-          }
-        }
-
-        return false;
-      }
-
-      try {
-        const teamPayload = await fetchTeamDetails(teamId);
-
-        setIsTeamArchived(isArchivedTeamData(teamPayload));
-
-        if (Array.isArray(teamPayload?.members)) {
-          if (!isUserTeamMember(teamPayload.members, user?.id)) {
-            revokeTeamChatAccess(teamId);
-            setLoadingMessages(false);
-            return true;
-          }
-
-          conversationDetails.data = mergeTeamDetailsIntoConversationData(
-            conversationDetails.data,
-            teamPayload,
-          );
-        }
-      } catch (teamError) {
-        console.error("Error fetching team member details:", teamError);
-      }
-
-      return false;
-    },
-    [fetchTeamDetails, revokeTeamChatAccess, user?.id],
-  );
+  const {
+    revokeTeamChatAccess,
+    refreshActiveTeamMembership,
+    hydrateTeamConversationDetails,
+  } = useChatTeamAccess({
+    queryClient,
+    user,
+    conversationId,
+    conversationType,
+    activeConversation,
+    searchParams,
+    navigate,
+    activeConversationRef,
+    clearTypingUsers,
+    setError,
+    setConversations,
+    setActiveConversation,
+    setMessages,
+    setReplyingTo,
+    setHighlightMessageIds,
+    setHasMoreMessages,
+    setShowChatView,
+    setIsTeamArchived,
+    setLoadingMessages,
+  });
 
   const { loadEarlierMessages } = useActiveChatConversation({
     conversationId,
@@ -538,49 +405,6 @@ const Chat = () => {
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
-
-  useEffect(() => {
-    if (
-      conversationType !== "team" ||
-      !activeConversation?.team?.id ||
-      !user?.id
-    ) {
-      return undefined;
-    }
-
-    const teamId = activeConversation.team.id;
-    let cancelled = false;
-
-    const checkMembership = async () => {
-      try {
-        if (!cancelled) {
-          await refreshActiveTeamMembership(teamId);
-        }
-      } catch (err) {
-        console.error("Error checking active team chat access:", err);
-      }
-    };
-
-    checkMembership();
-    const intervalId = window.setInterval(checkMembership, 10000);
-
-    const handleFocus = () => {
-      checkMembership();
-    };
-
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [
-    activeConversation?.team?.id,
-    conversationType,
-    refreshActiveTeamMembership,
-    user?.id,
-  ]);
 
   useEffect(() => {
     setIsActiveConversationVisible(true);

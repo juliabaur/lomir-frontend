@@ -11,11 +11,12 @@ Status as of 2026-07-03. This tracks the focused `Chat.jsx` decomposition work o
 - Stage 4b: Extracted Socket.IO event wiring for messages, read status, conversation updates, team membership changes, deleted conversations, message edits/deletes, and notification-triggered team refreshes to `src/hooks/useChatSocketEvents.js`.
 - Stage 4c: Extracted chat search query state, message search indexing, no-result toast handling, filtered conversation derivation, and search-panel visibility to `src/hooks/useChatSearchState.js`.
 - Stage 4d: Extracted active conversation loading, team/direct conversation hydration, socket join/leave, read marking, highlight handling, and earlier-message pagination to `src/hooks/useActiveChatConversation.js`; tightened 403/404 team access cleanup, empty direct-chat filtering, and user-scoped conversation cache keys.
+- Stage 5a: Extracted team-chat access + membership helpers (`fetchTeamDetails`, `revokeTeamChatAccess`, `refreshActiveTeamMembership`, `hydrateTeamConversationDetails`) and the 10s membership-polling effect to `src/hooks/useChatTeamAccess.js`. Verbatim move; these helpers were already consumed by `useActiveChatConversation` and `useChatSocketEvents`, so centralizing them untangles the prior `Chat.jsx` -> hooks prop wiring. `fetchTeamDetails` stays internal to the hook (only used by the other helpers).
 
 ## Current Branch
 
-- `refactor/chat-jsx-decomposition-stage-4d-active-conversation`
-- Latest completed work: extracted active conversation loading and earlier-message pagination to `useActiveChatConversation`, with Stage 4d follow-up fixes for stale team access, empty DMs, and account-switch cache isolation.
+- `refactor/chat-jsx-decomposition-stage-5a-team-access`
+- Latest completed work: extracted team-chat access/membership helpers and the membership-polling effect to `useChatTeamAccess`; `Chat.jsx` now calls the hook before `useActiveChatConversation`/`useChatSocketEvents` (which consume `revokeTeamChatAccess`, `refreshActiveTeamMembership`, `hydrateTeamConversationDetails`).
 
 ## Verification
 
