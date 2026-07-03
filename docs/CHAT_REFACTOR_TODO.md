@@ -12,11 +12,12 @@ Status as of 2026-07-03. This tracks the focused `Chat.jsx` decomposition work o
 - Stage 4c: Extracted chat search query state, message search indexing, no-result toast handling, filtered conversation derivation, and search-panel visibility to `src/hooks/useChatSearchState.js`.
 - Stage 4d: Extracted active conversation loading, team/direct conversation hydration, socket join/leave, read marking, highlight handling, and earlier-message pagination to `src/hooks/useActiveChatConversation.js`; tightened 403/404 team access cleanup, empty direct-chat filtering, and user-scoped conversation cache keys.
 - Stage 5a: Extracted team-chat access + membership helpers (`fetchTeamDetails`, `revokeTeamChatAccess`, `refreshActiveTeamMembership`, `hydrateTeamConversationDetails`) and the 10s membership-polling effect to `src/hooks/useChatTeamAccess.js`. Verbatim move; these helpers were already consumed by `useActiveChatConversation` and `useChatSocketEvents`, so centralizing them untangles the prior `Chat.jsx` -> hooks prop wiring. `fetchTeamDetails` stays internal to the hook (only used by the other helpers).
+- Stage 5: Extracted message + conversation action handlers to `src/hooks/useChatMessageActions.js`: send (text/image/file), edit, delete message, reply state wiring (`handleReplyToMessage`/`handleClearReply`), and the confirmable chat actions that share the `pendingChatAction` modal (`handleLeaveTeam`/`handleDeleteConversation`/`handleDeleteMessage` + `confirmPendingChatAction`/`closePendingChatAction` + `handleTeamDetailsLeave`). `execute*` helpers stay internal to the hook. Following the established chat-hook pattern, `Chat.jsx` remains the state owner (keeps `replyingTo`/`pendingChatAction`/`pendingChatActionLoading` state + the `pendingChatActionConfig`/Modal JSX) and passes state + setters in; the hook returns the handlers. Keeping `replyingTo` in `Chat.jsx` avoids a cycle (`useChatTeamAccess` needs `setReplyingTo`, message actions need `refreshActiveTeamMembership`). Removed now-unused imports `socketService`, `teamService`, `uploadToImageKit`. `Chat.jsx` 1350 -> 962 lines.
 
 ## Current Branch
 
-- `refactor/chat-jsx-decomposition-stage-5a-team-access`
-- Latest completed work: extracted team-chat access/membership helpers and the membership-polling effect to `useChatTeamAccess`; `Chat.jsx` now calls the hook before `useActiveChatConversation`/`useChatSocketEvents` (which consume `revokeTeamChatAccess`, `refreshActiveTeamMembership`, `hydrateTeamConversationDetails`).
+- `refactor/chat-jsx-decomposition-stage-5-message-actions` (off Stage 5a)
+- Latest completed work: extracted message/conversation action handlers to `useChatMessageActions`; `Chat.jsx` calls it after `useChatTeamAccess`/`useChatTyping` (consumes `refreshActiveTeamMembership`, `handleTyping`, `clearTypingUsers`) and binds the returned handlers in the render.
 
 ## Verification
 
