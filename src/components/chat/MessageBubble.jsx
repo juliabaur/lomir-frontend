@@ -287,7 +287,9 @@ const ReplyPreview = ({ replyPreview }) => {
           <p className="text-xs text-base-content/60 truncate">
             {replyPreview.content
               ? renderReplyContent(replyPreview.content)
-              : "Original message was deleted"}
+              : replyPreview.deletedAt || replyPreview.deleted_at
+                ? "Original message was deleted"
+                : "Message unavailable"}
           </p>
         )}
       </Tooltip>
