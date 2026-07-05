@@ -32,7 +32,10 @@ import { vacantRoleService } from "../../services/vacantRoleService";
 import { userService } from "../../services/userService";
 import useSocketEvents from "../../hooks/useSocketEvents";
 import useTeamRequestLists from "../../hooks/useTeamRequestLists";
-import { teamMemberBadgesByTeamQueryKey } from "../../hooks/useTeamQueries";
+import {
+  teamMemberBadgesByTeamQueryKey,
+  fetchTeamById,
+} from "../../hooks/useTeamQueries";
 import { useAuth } from "../../contexts/AuthContext";
 import Alert from "../common/Alert";
 import ConfirmModal from "../common/ConfirmModal";
@@ -1017,7 +1020,7 @@ const TeamCard = ({
 
       try {
         const teamByIdPromise = shouldFetchTeamById
-          ? teamService.getTeamById(teamData.id)
+          ? fetchTeamById(queryClient, teamData.id)
           : Promise.resolve(null);
 
         const memberBadgesPromise = shouldFetchMemberBadges
@@ -1046,7 +1049,9 @@ const TeamCard = ({
           memberBadgesPromise,
         ]);
 
-        const fullTeam = response?.data?.data ?? response?.data ?? null;
+        // fetchTeamById resolves to the unwrapped team payload (or null when
+        // the fetch was skipped), so no envelope unwrapping is needed here.
+        const fullTeam = response ?? null;
 
         setTeamData((prev) => {
           const baseTeam = fullTeam ?? prev;
@@ -1109,10 +1114,9 @@ const TeamCard = ({
     if (teamData.latitude != null) return;
 
     let active = true;
-    teamService.getTeamById(teamData.id)
-      .then((response) => {
+    fetchTeamById(queryClient, teamData.id)
+      .then((fullTeam) => {
         if (!active) return;
-        const fullTeam = response?.data?.data ?? response?.data ?? null;
         if (!fullTeam) return;
         const lat = fullTeam.latitude ?? fullTeam.lat ?? null;
         const lng = fullTeam.longitude ?? fullTeam.lng ?? fullTeam.lon ?? null;
@@ -1121,7 +1125,7 @@ const TeamCard = ({
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [isRoleVariant, teamData?.id]);
+  }, [isRoleVariant, teamData?.id, queryClient]);
 
   // Sync parent-managed member badges into teamData. When the parent provides
   // an array (bulk fetch resolved), we use it directly. While the parent is
@@ -1677,9 +1681,10 @@ const TeamCard = ({
   const handleModalClose = async () => {
     if (effectiveVariant === "member") {
       try {
-        const response = await teamService.getTeamById(teamData.id);
-        if (response && response.data) {
-          const fullTeam = response?.data?.data ?? response?.data;
+        const fullTeam = await fetchTeamById(queryClient, teamData.id, {
+          force: true,
+        });
+        if (fullTeam) {
           // Normalize is_public to ensure it's a boolean
           const normalizedTeam = {
             ...fullTeam,
@@ -1745,8 +1750,10 @@ const TeamCard = ({
     const result = await teamService.handleTeamApplication(applicationId, action, response, fillRole);
     await fetchPendingApplications();
     if (onUpdate) {
-      const updatedTeam = await teamService.getTeamById(teamData.id);
-      onUpdate(updatedTeam.data);
+      const updatedTeam = await fetchTeamById(queryClient, teamData.id, {
+        force: true,
+      });
+      onUpdate(updatedTeam);
     }
     return result;
   };
@@ -1760,8 +1767,9 @@ const TeamCard = ({
     await fetchPendingApplications();
 
     try {
-      const response = await teamService.getTeamById(teamData.id);
-      const fullTeam = response?.data?.data ?? response?.data;
+      const fullTeam = await fetchTeamById(queryClient, teamData.id, {
+        force: true,
+      });
 
       if (!fullTeam) return;
 
