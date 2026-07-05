@@ -29,6 +29,34 @@ const buildReplyPreview = (message, messagesById) => {
 
   if (!message.replyTo) return null;
 
+  // The embedded replyTo is a snapshot from send time. If the original message
+  // was deleted afterwards, honor the live/deleted state (resolved source, or a
+  // freshly fetched snapshot) and drop the stale quoted text/media so the
+  // preview reads as deleted instead of showing the old content.
+  const replyDeletedAt =
+    message.replyTo.deletedAt ??
+    message.replyTo.deleted_at ??
+    replySourceMessage?.deletedAt ??
+    replySourceMessage?.deleted_at ??
+    null;
+
+  if (replyDeletedAt) {
+    return {
+      ...message.replyTo,
+      deletedAt: replyDeletedAt,
+      content: null,
+      imageUrl: null,
+      image_url: null,
+      fileUrl: null,
+      file_url: null,
+      fileName: null,
+      file_name: null,
+      fileSize: null,
+      fileExpiresAt: null,
+      fileDeletedAt: null,
+    };
+  }
+
   return {
     ...replySourceMessage,
     ...message.replyTo,
@@ -285,11 +313,13 @@ const ReplyPreview = ({ replyPreview }) => {
           </p>
         ) : (
           <p className="text-xs text-base-content/60 truncate">
-            {replyPreview.content
-              ? renderReplyContent(replyPreview.content)
-              : replyPreview.deletedAt || replyPreview.deleted_at
-                ? "Original message was deleted"
-                : "Message unavailable"}
+            {replyPreview.content ? (
+              renderReplyContent(replyPreview.content)
+            ) : replyPreview.deletedAt || replyPreview.deleted_at ? (
+              <span className="italic">Original message was deleted</span>
+            ) : (
+              "Message unavailable"
+            )}
           </p>
         )}
       </Tooltip>
