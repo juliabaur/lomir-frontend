@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   LogOut,
-  ChevronRight,
-  ChevronLeft,
-  User,
   Trash2,
   Search,
   X,
@@ -16,11 +13,8 @@ import {
   getConversationsQueryKey,
 } from "../hooks/useChatQueries";
 import PageContainer from "../components/layout/PageContainer";
-import ConversationList from "../components/chat/ConversationList";
-import ConversationHeader from "../components/chat/ConversationHeader";
-import ArchivedTeamBanner from "../components/chat/ArchivedTeamBanner";
-import MessageDisplay from "../components/chat/MessageDisplay";
-import MessageInput from "../components/chat/MessageInput";
+import ConversationSidebar from "../components/chat/ConversationSidebar";
+import MessageArea from "../components/chat/MessageArea";
 import { useAuth } from "../contexts/AuthContext";
 import { messageService } from "../services/messageService";
 import useChatTyping from "../hooks/useChatTyping";
@@ -34,13 +28,8 @@ import { isQuietError } from "../services/api";
 import ScreenAlert from "../components/common/ScreenAlert";
 import Button from "../components/common/Button";
 import Modal from "../components/common/Modal";
-import Tooltip from "../components/common/Tooltip";
-import { CountBadge } from "../components/common/NotificationBadge";
-import UserAvatar from "../components/users/UserAvatar";
-import TeamAvatar from "../components/teams/TeamAvatar";
 import TeamDetailsModal from "../components/teams/TeamDetailsModal";
 import UserDetailsModal from "../components/users/UserDetailsModal";
-import { DEMO_PROFILE_TOOLTIP, DEMO_TEAM_TOOLTIP } from "../utils/userHelpers";
 import {
   formatArchiveTimeRemaining,
   msUntilNextArchiveChange,
@@ -770,119 +759,69 @@ const Chat = () => {
       </Modal>
 
       <div className="flex h-[calc(100vh-200px)] gap-2">
-        {/* Conversation List - Left Sidebar */}
-        <div
-          data-conversation-list-viewport="true"
-          className={`lomir-conversation-list-scrollbar overflow-y-auto transition-all duration-300 ${
-            showEmptyConversationState || hideChatDuringSearch || !shouldShowConversationPanel
-              ? "w-full"
-              : "hidden md:block md:w-1/3"
-          }`}
-          style={{ direction: "rtl" }}
-        >
-          <div className="h-full" style={{ direction: "ltr" }}>
-            <ConversationList
-              conversations={isNoSearchResults ? conversations : filteredConversations}
-              activeConversationId={conversationId}
-              onSelectConversation={selectConversation}
-              loading={loading}
-              onlineUsers={onlineUsers}
-              onActiveConversationVisibilityChange={
-                handleActiveConversationVisibilityChange
-              }
-              teamMembersRefreshSignal={teamMembersRefreshSignal}
-              emptyState={isNoSearchResults ? null : chatSearchEmptyState}
-              searchQuery={isNoSearchResults ? "" : chatSearchQuery}
-              chatVisible={!hideChatDuringSearch && showChatView}
-              currentUser={user}
-            />
-          </div>
-        </div>
+        <ConversationSidebar
+          fullWidth={
+            showEmptyConversationState ||
+            hideChatDuringSearch ||
+            !shouldShowConversationPanel
+          }
+          conversations={isNoSearchResults ? conversations : filteredConversations}
+          activeConversationId={conversationId}
+          onSelectConversation={selectConversation}
+          loading={loading}
+          onlineUsers={onlineUsers}
+          onActiveConversationVisibilityChange={
+            handleActiveConversationVisibilityChange
+          }
+          teamMembersRefreshSignal={teamMembersRefreshSignal}
+          emptyState={isNoSearchResults ? null : chatSearchEmptyState}
+          searchQuery={isNoSearchResults ? "" : chatSearchQuery}
+          chatVisible={!hideChatDuringSearch && showChatView}
+          currentUser={user}
+        />
 
-        {/* Message Display - Right Side */}
         {shouldShowConversationPanel && (
-        <div className={`bg-white shadow-soft rounded-xl overflow-hidden flex flex-col min-w-0 transition-all duration-300 ${
-          showChatView ? "w-full md:w-2/3" : "hidden md:flex md:w-2/3"
-        }`}>
-          {conversationId ? (
-            <>
-              <ConversationHeader
-                showCompactConversationHeader={showCompactConversationHeader}
-                onBack={() => setShowChatView(false)}
-                conversationType={conversationType}
-                teamData={teamData}
-                conversationPartner={conversationPartner}
-                activeConversation={activeConversation}
-                conversationUpdatedAt={conversationUpdatedAt}
-                onTeamClick={handleHeaderTeamClick}
-                onUserClick={handleHeaderUserClick}
-              />
-
-              <div ref={messagesContainerRef} className="flex-grow overflow-y-auto p-4">
-                <MessageDisplay
-                  messages={visibleMessages}
-                  currentUserId={user?.id}
-                  conversationPartner={conversationPartner}
-                  teamData={teamData}
-                  loading={loadingMessages}
-                  typingUsers={activeTypingUsers}
-                  conversationType={conversationType}
-                  teamMembers={teamMembers}
-                  highlightMessageIds={highlightMessageIds}
-                  hasMoreMessages={hasMoreMessages}
-                  loadingMore={loadingMore}
-                  teamMembersRefreshSignal={teamMembersRefreshSignal}
-                  onLoadEarlierMessages={loadEarlierMessages}
-                  onDeleteConversation={handleDeleteConversation}
-                  onDeleteMessage={handleDeleteMessage}
-                  onEditMessage={handleEditMessage}
-                  onLeaveTeam={handleLeaveTeam}
-                  onReply={handleReplyToMessage}
-                  searchQuery={chatSearchQuery}
-                />
-              </div>
-
-              {/* Deleted team banner + message input */}
-              <div className="border-t border-base-200">
-                {/* Show banner for archived teams */}
-                {isActiveTeamArchived &&
-                  conversationType === "team" &&
-                  isCurrentUserActiveTeamMember && (
-                  <ArchivedTeamBanner
-                    timeRemaining={activeTeamArchiveTimeRemaining}
-                    onLeave={() => handleLeaveTeam()}
-                  />
-                )}
-
-                <div className="p-4">
-                  <MessageInput
-                    onSendMessage={handleSendMessage}
-                    onSendImage={handleSendImage}
-                    onSendFile={handleSendFile}
-                    onTyping={handleTyping}
-                    disabled={!canSendInActiveConversation}
-                    participants={mentionParticipants}
-                    replyingTo={replyingTo}
-                    onClearReply={handleClearReply}
-                  />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <p className="text-base-content/70">
-                Select a conversation to start chatting
-              </p>
-              <button
-                onClick={() => setShowChatView(false)}
-                className="md:hidden flex items-center gap-2 btn btn-sm btn-outline"
-              >
-                <ChevronLeft size={16} />
-                Back to conversations
-              </button>
-            </div>
-          )}
-        </div>
+          <MessageArea
+            showChatView={showChatView}
+            conversationId={conversationId}
+            onBack={() => setShowChatView(false)}
+            messagesContainerRef={messagesContainerRef}
+            showCompactConversationHeader={showCompactConversationHeader}
+            conversationType={conversationType}
+            teamData={teamData}
+            conversationPartner={conversationPartner}
+            activeConversation={activeConversation}
+            conversationUpdatedAt={conversationUpdatedAt}
+            onTeamClick={handleHeaderTeamClick}
+            onUserClick={handleHeaderUserClick}
+            messages={visibleMessages}
+            currentUserId={user?.id}
+            loadingMessages={loadingMessages}
+            typingUsers={activeTypingUsers}
+            teamMembers={teamMembers}
+            highlightMessageIds={highlightMessageIds}
+            hasMoreMessages={hasMoreMessages}
+            loadingMore={loadingMore}
+            teamMembersRefreshSignal={teamMembersRefreshSignal}
+            onLoadEarlierMessages={loadEarlierMessages}
+            onDeleteConversation={handleDeleteConversation}
+            onDeleteMessage={handleDeleteMessage}
+            onEditMessage={handleEditMessage}
+            onLeaveTeam={handleLeaveTeam}
+            onReply={handleReplyToMessage}
+            searchQuery={chatSearchQuery}
+            isActiveTeamArchived={isActiveTeamArchived}
+            isCurrentUserActiveTeamMember={isCurrentUserActiveTeamMember}
+            activeTeamArchiveTimeRemaining={activeTeamArchiveTimeRemaining}
+            onSendMessage={handleSendMessage}
+            onSendImage={handleSendImage}
+            onSendFile={handleSendFile}
+            onTyping={handleTyping}
+            canSendInActiveConversation={canSendInActiveConversation}
+            participants={mentionParticipants}
+            replyingTo={replyingTo}
+            onClearReply={handleClearReply}
+          />
         )}
       </div>
       <TeamDetailsModal
