@@ -42,7 +42,6 @@ import TeamDetailsModal from "../components/teams/TeamDetailsModal";
 import UserDetailsModal from "../components/users/UserDetailsModal";
 import { DEMO_PROFILE_TOOLTIP, DEMO_TEAM_TOOLTIP } from "../utils/userHelpers";
 import {
-  normalizeTimestampToDate,
   formatArchiveTimeRemaining,
   msUntilNextArchiveChange,
 } from "../utils/dateHelpers";
@@ -52,6 +51,7 @@ import {
   isUserTeamMember,
   isArchivedTeamData,
   getConversationUpdatedAt,
+  dedupeMessages,
 } from "../utils/chatHelpers";
 import {
   dedupeConversations,
@@ -176,62 +176,6 @@ const Chat = () => {
     messages,
     onSearchQueryChange: handleChatSearchQueryChange,
   });
-
-  // ---- Message de-duplication (focus: ownership/system duplicates) ----
-  const toMinuteBucket = (isoOrDate) => {
-    try {
-      const d = isoOrDate ? normalizeTimestampToDate(isoOrDate) : null;
-      if (!d || Number.isNaN(d.getTime())) return "";
-      return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
-    } catch {
-      return "";
-    }
-  };
-
-  const buildMessageDedupeKey = (msg) => {
-    const content = (msg?.content || "").trim();
-    const minute = toMinuteBucket(msg?.createdAt);
-    const senderId = msg?.senderId ?? "";
-
-    // OWNERSHIP_TEAM (legacy emoji optional)
-    let m = content.match(/^(?:👑\s*)?OWNERSHIP_TEAM:\s*(.+?)\s*\|\s*(.+)\s*$/);
-    if (m) return `ownership_team|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // OWNERSHIP_TRANSFERRED (legacy emoji optional)
-    m = content.match(
-      /^(?:👑\s*)?OWNERSHIP_TRANSFERRED:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+)\s*$/,
-    );
-    if (m)
-      return `ownership_transferred|${m[1].trim()}|${m[2].trim()}|${m[3].trim()}|${minute}`;
-
-    // Plain team chat sentence variant
-    m = content.match(
-      /^(.+?)\s+transferred\s+(?:team\s+)?ownership\s+to\s+(.+?)\.?$/i,
-    );
-    if (m)
-      return `ownership_team_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // Plain DM sentence variant
-    m = content.match(
-      /^(.+?)\s+transferred\s+ownership\s+of\s+"(.+?)"\s+to\s+you\.\s*Congratulations!?\.?$/i,
-    );
-    if (m) return `ownership_dm_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // Fallback: exact duplicates per minute
-    return `generic|${senderId}|${content}|${minute}`;
-  };
-
-  const dedupeMessages = (list) => {
-    const seen = new Set();
-    const out = [];
-    for (const msg of list || []) {
-      const key = buildMessageDedupeKey(msg);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(msg);
-    }
-    return out;
-  };
 
   const conversationPartner =
     conversationType === "direct"

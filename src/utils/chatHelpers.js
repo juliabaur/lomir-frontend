@@ -252,3 +252,59 @@ export const getConversationUpdatedAt = (conversation) => {
 export const isDirectConversationForPartner = (conversation, partnerId) =>
   conversation?.type === "direct" &&
   String(getConversationPartnerId(conversation)) === String(partnerId);
+
+// ---- Message de-duplication (focus: ownership/system duplicates) ----
+export const toMinuteBucket = (isoOrDate) => {
+  try {
+    const d = isoOrDate ? normalizeTimestampToDate(isoOrDate) : null;
+    if (!d || Number.isNaN(d.getTime())) return "";
+    return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+  } catch {
+    return "";
+  }
+};
+
+export const buildMessageDedupeKey = (msg) => {
+  const content = (msg?.content || "").trim();
+  const minute = toMinuteBucket(msg?.createdAt);
+  const senderId = msg?.senderId ?? "";
+
+  // OWNERSHIP_TEAM (legacy emoji optional)
+  let m = content.match(/^(?:👑\s*)?OWNERSHIP_TEAM:\s*(.+?)\s*\|\s*(.+)\s*$/);
+  if (m) return `ownership_team|${m[1].trim()}|${m[2].trim()}|${minute}`;
+
+  // OWNERSHIP_TRANSFERRED (legacy emoji optional)
+  m = content.match(
+    /^(?:👑\s*)?OWNERSHIP_TRANSFERRED:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+)\s*$/,
+  );
+  if (m)
+    return `ownership_transferred|${m[1].trim()}|${m[2].trim()}|${m[3].trim()}|${minute}`;
+
+  // Plain team chat sentence variant
+  m = content.match(
+    /^(.+?)\s+transferred\s+(?:team\s+)?ownership\s+to\s+(.+?)\.?$/i,
+  );
+  if (m)
+    return `ownership_team_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
+
+  // Plain DM sentence variant
+  m = content.match(
+    /^(.+?)\s+transferred\s+ownership\s+of\s+"(.+?)"\s+to\s+you\.\s*Congratulations!?\.?$/i,
+  );
+  if (m) return `ownership_dm_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
+
+  // Fallback: exact duplicates per minute
+  return `generic|${senderId}|${content}|${minute}`;
+};
+
+export const dedupeMessages = (list) => {
+  const seen = new Set();
+  const out = [];
+  for (const msg of list || []) {
+    const key = buildMessageDedupeKey(msg);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(msg);
+  }
+  return out;
+};
