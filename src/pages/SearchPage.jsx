@@ -41,6 +41,7 @@ import {
   Target,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTeamMemberBadges } from "../hooks/useTeamQueries";
 import { getApiErrorMessage } from "../services/searchService";
 import {
   globalSearchQueryKey,
@@ -849,6 +850,24 @@ const SearchPage = () => {
         ? displaySearchResults.roles
         : [],
   };
+  // Bulk member badges for all team results in one request (keyed by team id),
+  // via React Query, mirroring MyTeams. Team cards read `null` as "still
+  // loading" so they wait instead of each firing their own per-card
+  // member-badges fetch (the old N+1); `{}` means loaded/errored -> cards stop
+  // waiting and show no badges. Keyed by the full result set so paging does not
+  // refetch.
+  const teamResultIds = useMemo(
+    () => filteredResults.teams.map((t) => t?.id).filter((id) => id != null),
+    [filteredResults.teams],
+  );
+  const { data: teamMemberBadgesData, isError: teamMemberBadgesIsError } =
+    useTeamMemberBadges(teamResultIds);
+  const teamMemberBadgesById = useMemo(() => {
+    if (teamResultIds.length === 0) return {};
+    if (teamMemberBadgesIsError) return {};
+    return teamMemberBadgesData ?? null;
+  }, [teamResultIds.length, teamMemberBadgesIsError, teamMemberBadgesData]);
+
   const usesClientMergedPagination = shouldUseMergedResultPagination({
     searchType,
     sortBy,
@@ -2524,6 +2543,11 @@ const SearchPage = () => {
                         <TeamCard
                           key={`team-${item.id}`}
                           team={withViewerTeamRole(item)}
+                          teamMemberBadges={
+                            teamMemberBadgesById === null
+                              ? null
+                              : teamMemberBadgesById[item.id] || []
+                          }
                           onUpdate={handleTeamUpdate}
                           isSearchResult={true}
                           viewerDistanceSource={viewerDistanceSource}
@@ -2598,6 +2622,11 @@ const SearchPage = () => {
                         <TeamCard
                           key={`team-${item.id}`}
                           team={withViewerTeamRole(item)}
+                          teamMemberBadges={
+                            teamMemberBadgesById === null
+                              ? null
+                              : teamMemberBadgesById[item.id] || []
+                          }
                           onUpdate={handleTeamUpdate}
                           isSearchResult={true}
                           viewerDistanceSource={viewerDistanceSource}

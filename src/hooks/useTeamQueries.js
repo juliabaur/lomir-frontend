@@ -60,6 +60,16 @@ export const teamMemberBadgesQueryKey = (teamIds) => [
   (teamIds ?? []).join(","),
 ];
 
+// Per-team member-badge cache key (single-team endpoint), used by TeamCard's
+// fallback fetch when the parent isn't bulk-managing badges. Replaces the old
+// module-level Map so the result is deduped/invalidatable via React Query.
+export const teamMemberBadgesByTeamQueryKey = (teamId) => [
+  "teams",
+  "byId",
+  String(teamId),
+  "memberBadges",
+];
+
 /**
  * Bulk member-badge map for the given team ids, keyed by team id. One request
  * for the whole list instead of a per-card fetch. Resolves to `{}` when there

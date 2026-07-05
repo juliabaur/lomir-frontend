@@ -26,11 +26,13 @@ import TeamApplicationDetailsModal from "./TeamApplicationDetailsModal";
 import VacantRoleDetailsModal from "./VacantRoleDetailsModalLazy";
 import TeamInvitesModal from "./TeamInvitesModal";
 import TeamInvitationDetailsModal from "./TeamInvitationDetailsModal";
+import { useQueryClient } from "@tanstack/react-query";
 import { teamService } from "../../services/teamService";
 import { vacantRoleService } from "../../services/vacantRoleService";
 import { userService } from "../../services/userService";
 import useSocketEvents from "../../hooks/useSocketEvents";
 import useTeamRequestLists from "../../hooks/useTeamRequestLists";
+import { teamMemberBadgesByTeamQueryKey } from "../../hooks/useTeamQueries";
 import { useAuth } from "../../contexts/AuthContext";
 import Alert from "../common/Alert";
 import ConfirmModal from "../common/ConfirmModal";
@@ -68,7 +70,6 @@ import {
 } from "../../utils/userHelpers";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
 
-const teamMemberBadgesCache = new Map();
 const viewerRoleProfileCache = new Map();
 const teamOpenRolesCache = new Map();
 const EMPTY_ARRAY = [];
@@ -623,6 +624,7 @@ const TeamCard = ({
   const [teamData, setTeamData] = useState(normalizedData.team);
   const [freshOpenRoleSnapshot, setFreshOpenRoleSnapshot] = useState(null);
   const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
   const [isApplicationsModalOpen, setIsApplicationsModalOpen] = useState(false);
   const [isInvitesModalOpen, setIsInvitesModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
@@ -1019,25 +1021,22 @@ const TeamCard = ({
           : Promise.resolve(null);
 
         const memberBadgesPromise = shouldFetchMemberBadges
-          ? (() => {
-              const cached = teamMemberBadgesCache.get(teamData.id);
-              if (cached) return Promise.resolve(cached);
-
-              return teamService
-                .getTeamMemberBadges(teamData.id)
-                .then((badgesResponse) => {
-                  const badges = extractBadgeRows(badgesResponse);
-                  teamMemberBadgesCache.set(teamData.id, badges);
-                  return badges;
-                })
-                .catch((badgeError) => {
-                  console.warn(
-                    "Could not fetch team member badges for card display:",
-                    badgeError,
-                  );
-                  return [];
-                });
-            })()
+          ? queryClient
+              .fetchQuery({
+                queryKey: teamMemberBadgesByTeamQueryKey(teamData.id),
+                queryFn: async () =>
+                  extractBadgeRows(
+                    await teamService.getTeamMemberBadges(teamData.id),
+                  ),
+                staleTime: Infinity,
+              })
+              .catch((badgeError) => {
+                console.warn(
+                  "Could not fetch team member badges for card display:",
+                  badgeError,
+                );
+                return [];
+              })
           : Promise.resolve(
               hasDisplayableBadges(teamData.badges) ? teamData.badges : [],
             );
