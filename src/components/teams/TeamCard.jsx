@@ -33,6 +33,7 @@ import useSocketEvents from "../../hooks/useSocketEvents";
 import useTeamRequestLists from "../../hooks/useTeamRequestLists";
 import {
   teamMemberBadgesByTeamQueryKey,
+  teamOpenRolesQueryKey,
   fetchTeamById,
 } from "../../hooks/useTeamQueries";
 import {
@@ -77,7 +78,6 @@ import {
 } from "../../utils/userHelpers";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
 
-const teamOpenRolesCache = new Map();
 const EMPTY_ARRAY = [];
 
 const extractArrayPayload = (payload) => {
@@ -723,17 +723,16 @@ const TeamCard = ({
     }
 
     let isActive = true;
-    const cacheKey = String(teamData.id);
-    let openRolesRequest = teamOpenRolesCache.get(cacheKey);
 
-    if (!openRolesRequest) {
-      openRolesRequest = vacantRoleService
-        .getVacantRoles(teamData.id, "open")
-        .then((response) => extractArrayPayload(response).filter(isOpenRole));
-      teamOpenRolesCache.set(cacheKey, openRolesRequest);
-    }
-
-    openRolesRequest
+    queryClient
+      .fetchQuery({
+        queryKey: teamOpenRolesQueryKey(teamData.id),
+        queryFn: () =>
+          vacantRoleService
+            .getVacantRoles(teamData.id, "open")
+            .then((response) => extractArrayPayload(response).filter(isOpenRole)),
+        staleTime: Infinity,
+      })
       .then((roles) => {
         if (!isActive) return;
 
@@ -745,7 +744,11 @@ const TeamCard = ({
         });
       })
       .catch((error) => {
-        teamOpenRolesCache.delete(cacheKey);
+        // Drop the cached rejection so a later mount can retry cleanly (mirrors
+        // the old Map delete-on-error).
+        queryClient.removeQueries({
+          queryKey: teamOpenRolesQueryKey(teamData.id),
+        });
         if (!isActive) return;
         console.warn("Could not fetch current open roles for team card:", error);
         setFreshOpenRoleSnapshot(null);
@@ -763,6 +766,7 @@ const TeamCard = ({
     teamData?.open_roles_count,
     teamData?.openRoleNames,
     teamData?.open_role_names,
+    queryClient,
   ]);
 
   //   // Fetch user's role in this team (only for member variant)
@@ -1757,7 +1761,9 @@ const TeamCard = ({
 
   const handleVacantRoleStatusChange = async () => {
     if (teamData?.id != null) {
-      teamOpenRolesCache.delete(String(teamData.id));
+      queryClient.removeQueries({
+        queryKey: teamOpenRolesQueryKey(teamData.id),
+      });
       setFreshOpenRoleSnapshot(null);
     }
 

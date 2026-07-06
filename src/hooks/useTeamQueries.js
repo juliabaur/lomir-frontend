@@ -70,6 +70,15 @@ export const teamMemberBadgesByTeamQueryKey = (teamId) => [
   "memberBadges",
 ];
 
+// Per-team open-role snapshot cache key. Used by TeamCard's fallback fetch when a
+// team has open roles (count > 0) whose names aren't embedded in the list payload.
+export const teamOpenRolesQueryKey = (teamId) => [
+  "teams",
+  "byId",
+  String(teamId),
+  "openRoles",
+];
+
 /**
  * Bulk member-badge map for the given team ids, keyed by team id. One request
  * for the whole list instead of a per-card fetch. Resolves to `{}` when there
