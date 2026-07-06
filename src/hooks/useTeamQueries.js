@@ -79,6 +79,16 @@ export const teamOpenRolesQueryKey = (teamId) => [
   "openRoles",
 ];
 
+// Viewer's role in a team cache key. Used by TeamCard's fallback when the role
+// isn't preloaded from the list payload and the viewer isn't the owner.
+export const teamUserRoleQueryKey = (teamId, userId) => [
+  "teams",
+  "byId",
+  String(teamId),
+  "userRole",
+  String(userId),
+];
+
 /**
  * Bulk member-badge map for the given team ids, keyed by team id. One request
  * for the whole list instead of a per-card fetch. Resolves to `{}` when there

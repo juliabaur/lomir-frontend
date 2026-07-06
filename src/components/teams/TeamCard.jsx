@@ -34,6 +34,7 @@ import useTeamRequestLists from "../../hooks/useTeamRequestLists";
 import {
   teamMemberBadgesByTeamQueryKey,
   teamOpenRolesQueryKey,
+  teamUserRoleQueryKey,
   fetchTeamById,
 } from "../../hooks/useTeamQueries";
 import {
@@ -822,16 +823,22 @@ const TeamCard = ({
       }
 
       try {
-        const response = await teamService.getUserRoleInTeam(
-          teamData.id,
-          user.id,
-        );
-
-        const payload = response?.data;
-        const data = payload?.data ?? payload; // supports both shapes
-
-        const isMember = data?.isMember ?? payload?.isMember;
-        const role = data?.role ?? payload?.role ?? null;
+        const { isMember, role } = await queryClient.fetchQuery({
+          queryKey: teamUserRoleQueryKey(teamData.id, user.id),
+          queryFn: async () => {
+            const response = await teamService.getUserRoleInTeam(
+              teamData.id,
+              user.id,
+            );
+            const payload = response?.data;
+            const data = payload?.data ?? payload; // supports both shapes
+            return {
+              isMember: data?.isMember ?? payload?.isMember,
+              role: data?.role ?? payload?.role ?? null,
+            };
+          },
+          staleTime: Infinity,
+        });
 
         if (isMember === false) {
           setUserRole(null);
@@ -853,6 +860,7 @@ const TeamCard = ({
     teamData?.userRole,
     teamData?.user_role,
     effectiveVariant,
+    queryClient,
   ]);
 
   // Counts may be preloaded by the parent's list response (getUserTeams).
