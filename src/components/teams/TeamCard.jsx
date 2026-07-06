@@ -2711,4 +2711,49 @@ const TeamCard = ({
   );
 };
 
-export default TeamCard;
+TeamCard.displayName = "TeamCard";
+
+// One-level shallow equality for plain objects / arrays.
+const shallowEqualOneLevel = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+};
+
+/**
+ * Custom React.memo comparator for TeamCard.
+ *
+ * SearchPage/MyTeams re-spread their result items (`{...t}`) and re-run
+ * `withViewerTeamRole` on every render, so object props (team/application/
+ * invitation/activeFilters/teamMemberBadges/roleMatchBadgeNames) get fresh
+ * wrappers each render even when nothing changed — but the copied inner values
+ * keep their references (they come from the stable query cache). A one-level
+ * shallow compare therefore bails safely: it returns equal only when every
+ * top-level value is identical, and errs toward re-rendering on any real
+ * change. Handlers/scalars are compared by identity, so callbacks must be
+ * referentially stable (useCallback) at the call sites for the bail to apply.
+ */
+const areTeamCardPropsEqual = (prev, next) => {
+  const prevKeys = Object.keys(prev);
+  if (prevKeys.length !== Object.keys(next).length) return false;
+  for (const key of prevKeys) {
+    const a = prev[key];
+    const b = next[key];
+    if (a === b) continue;
+    if (a && b && typeof a === "object" && typeof b === "object") {
+      if (shallowEqualOneLevel(a, b)) continue;
+      return false;
+    }
+    return false;
+  }
+  return true;
+};
+
+export default React.memo(TeamCard, areTeamCardPropsEqual);

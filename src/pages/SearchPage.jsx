@@ -1842,28 +1842,31 @@ const SearchPage = () => {
     );
   };
 
-  const handleTeamUpdate = (updatedTeam) => {
-    queryClient.setQueryData(
-      globalSearchQueryKey(requestCriteria, isAuthenticated),
-      (prev) =>
-        prev?.data
-          ? {
-              ...prev,
-              data: {
-                ...prev.data,
-                teams: (prev.data.teams ?? []).map((t) =>
-                  t.id === updatedTeam.id
-                    ? {
-                        ...updatedTeam,
-                        is_public: updatedTeam.is_public === true,
-                      }
-                    : t,
-                ),
-              },
-            }
-          : prev,
-    );
-  };
+  const handleTeamUpdate = useCallback(
+    (updatedTeam) => {
+      queryClient.setQueryData(
+        globalSearchQueryKey(requestCriteria, isAuthenticated),
+        (prev) =>
+          prev?.data
+            ? {
+                ...prev,
+                data: {
+                  ...prev.data,
+                  teams: (prev.data.teams ?? []).map((t) =>
+                    t.id === updatedTeam.id
+                      ? {
+                          ...updatedTeam,
+                          is_public: updatedTeam.is_public === true,
+                        }
+                      : t,
+                  ),
+                },
+              }
+            : prev,
+      );
+    },
+    [queryClient, requestCriteria, isAuthenticated],
+  );
 
   const getTotalItemsForFilter = () => {
     switch (searchType) {
