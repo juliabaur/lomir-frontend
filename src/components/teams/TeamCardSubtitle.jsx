@@ -3,8 +3,6 @@ import { format } from "date-fns";
 import {
   Users,
   UserSearch,
-  EyeClosed,
-  EyeIcon,
   User,
   Crown,
   ShieldCheck,
@@ -12,10 +10,14 @@ import {
   Mail,
   Globe,
   MapPin,
-  FlaskConical,
 } from "lucide-react";
 import Tooltip from "../common/Tooltip";
 import { normalizeLocationData } from "../../utils/locationUtils";
+import {
+  OpenRolesIndicator,
+  VisibilityIndicator,
+  DemoIndicator,
+} from "./TeamCardIndicators";
 
 /**
  * Presentational subtitle indicator row for the card/mini TeamCard views.
@@ -236,40 +238,18 @@ const TeamCardSubtitle = ({
         )}
 
       {/* Open roles count */}
-      {shouldShowOpenRoleCount && openRoleCount > 0 && (
-        <Tooltip content={`${openRoleCount} open ${openRoleCount === 1 ? 'role' : 'roles'} posted in this team`}>
-          <span className="flex items-center">
-            <UserSearch
-              size={viewMode === "mini" ? 10 : 13}
-              className="text-orange-500 mr-0.5"
-            />
-            <span>{openRoleCount}</span>
-          </span>
-        </Tooltip>
-      )}
+      <OpenRolesIndicator
+        size={viewMode === "mini" ? 10 : 13}
+        shouldShow={shouldShowOpenRoleCount}
+        openRoleCount={openRoleCount}
+      />
 
       {/* Privacy status */}
-      {showVisibilityIcon && (
-        <Tooltip
-          content={
-            teamData.is_public === true || teamData.isPublic === true
-              ? "Public Team - visible for everyone"
-              : "Private Team - only visible for Members"
-          }
-        >
-          {teamData.is_public === true || teamData.isPublic === true ? (
-            <EyeIcon
-              size={viewMode === "mini" ? 10 : 13}
-              className="text-green-600"
-            />
-          ) : (
-            <EyeClosed
-              size={viewMode === "mini" ? 10 : 13}
-              className="text-gray-500"
-            />
-          )}
-        </Tooltip>
-      )}
+      <VisibilityIndicator
+        size={viewMode === "mini" ? 10 : 13}
+        show={showVisibilityIcon}
+        isPublic={teamData.is_public === true || teamData.isPublic === true}
+      />
 
       {/* Pending role application indicator */}
       {!shouldMoveSearchResultRoleApplicationIndicator &&
@@ -341,17 +321,12 @@ const TeamCardSubtitle = ({
             )}
           </span>
         )}
-      {showDemoIndicator && (
-        <Tooltip
-          content={demoTooltip}
-          wrapperClassName="flex items-center gap-1 text-base-content/50"
-        >
-          <FlaskConical
-            size={viewMode === "mini" ? 10 : 13}
-            className="flex-shrink-0"
-          />
-        </Tooltip>
-      )}
+      <DemoIndicator
+        size={viewMode === "mini" ? 10 : 13}
+        show={showDemoIndicator}
+        tooltip={demoTooltip}
+        wrapperClassName="flex items-center gap-1 text-base-content/50"
+      />
     </span>
   );
 };

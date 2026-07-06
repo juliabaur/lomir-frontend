@@ -3,16 +3,18 @@ import { format } from "date-fns";
 import {
   Users,
   UserSearch,
-  EyeClosed,
-  EyeIcon,
   User,
   Crown,
   ShieldCheck,
   SendHorizontal,
   Mail,
-  FlaskConical,
 } from "lucide-react";
 import Tooltip from "../common/Tooltip";
+import {
+  OpenRolesIndicator,
+  VisibilityIndicator,
+  DemoIndicator,
+} from "./TeamCardIndicators";
 
 /**
  * Presentational subtitle indicator row for the list TeamCard view.
@@ -136,14 +138,11 @@ const TeamCardListSubtitle = ({
           <span>{teamApplicationRoleName}</span>
         </Tooltip>
       )}
-      {shouldShowOpenRoleCount && openRoleCount > 0 && (
-        <Tooltip content={`${openRoleCount} open ${openRoleCount === 1 ? 'role' : 'roles'} posted in this team`}>
-          <span className="flex items-center">
-            <UserSearch size={9} className="text-orange-500 mr-0.5" />
-            <span>{openRoleCount}</span>
-          </span>
-        </Tooltip>
-      )}
+      <OpenRolesIndicator
+        size={9}
+        shouldShow={shouldShowOpenRoleCount}
+        openRoleCount={openRoleCount}
+      />
       {isRoleVariant && teamData._teamName && (
         <Tooltip content="Click to view team details" wrapperClassName="inline-flex items-center gap-0.5">
           <span
@@ -174,23 +173,17 @@ const TeamCardListSubtitle = ({
           )}
         </>
       )}
-      {showVisibilityIcon && (
-        <Tooltip content={teamData.is_public === true || teamData.isPublic === true ? "Public Team - visible for everyone" : "Private Team - only visible for Members"}>
-          {teamData.is_public === true || teamData.isPublic === true ? (
-            <EyeIcon size={9} className="text-green-600" />
-          ) : (
-            <EyeClosed size={9} className="text-gray-500" />
-          )}
-        </Tooltip>
-      )}
-      {showDemoIndicator && (
-        <Tooltip
-          content={demoTooltip}
-          wrapperClassName="inline-flex items-center whitespace-nowrap text-base-content/50"
-        >
-          <FlaskConical size={9} className="flex-shrink-0" />
-        </Tooltip>
-      )}
+      <VisibilityIndicator
+        size={9}
+        show={showVisibilityIcon}
+        isPublic={teamData.is_public === true || teamData.isPublic === true}
+      />
+      <DemoIndicator
+        size={9}
+        show={showDemoIndicator}
+        tooltip={demoTooltip}
+        wrapperClassName="inline-flex items-center whitespace-nowrap text-base-content/50"
+      />
     </span>
   );
 };
