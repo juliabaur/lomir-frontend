@@ -5,19 +5,11 @@ import Tooltip from "../common/Tooltip";
 import {
   Users,
   UserSearch,
-  EyeClosed,
-  EyeIcon,
   Award,
-  User,
-  Crown,
-  ShieldCheck,
   SendHorizontal,
   Mail,
-  Globe,
-  MapPin,
   Ruler,
   Calendar,
-  FlaskConical,
   Trash2,
 } from "lucide-react";
 import TeamDetailsModal from "./TeamDetailsModal";
@@ -62,7 +54,6 @@ import { extractNames, summarizeList } from "../../utils/listSummaryUtils";
 import {
   calculateDistanceKm,
   formatListLocation,
-  normalizeLocationData,
 } from "../../utils/locationUtils";
 import { extractProfilePayload } from "../../utils/payloadExtractors";
 import {
@@ -78,6 +69,8 @@ import {
   isSyntheticTeam,
 } from "../../utils/userHelpers";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
+import TeamCardSubtitle from "./TeamCardSubtitle";
+import TeamCardListSubtitle from "./TeamCardListSubtitle";
 
 const EMPTY_ARRAY = [];
 
@@ -2129,145 +2122,43 @@ const TeamCard = ({
       </span>
     ) : null;
 
+    // Resolve the pure subtitle getters once so <TeamCardListSubtitle> receives
+    // primitive props and its React.memo can bail out on unrelated re-renders.
+    const listFormattedDate = getFormattedDate();
+    const listInternalRoleInvitationTooltip = getInternalRoleInvitationTooltip();
+    const listShowVisibilityIcon = shouldShowVisibilityIcon();
+
     const subtitleContent = (
-      <span className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-base-content/60 space-x-1">
-        {scoreSubtitleItem}
-        {memberCountListItem}
-        {(effectiveVariant === "invitation" || isRoleInvitationVariant || pendingInvitationForTeam) && (
-          <Tooltip
-            content={
-              hasInternalRoleInvitation
-                ? getInternalRoleInvitationTooltip()
-                : `You were invited to this team${
-                    getFormattedDate()
-                      ? `\non ${format(new Date(normalizedData.date), "MMM d, yyyy")}`
-                      : ""
-                  }`
-            }
-          >
-            <span
-              className={`flex items-center gap-0.5 ${isRoleInvitationVariant ? "cursor-pointer" : ""}`}
-              onClick={
-                isRoleInvitationVariant
-                  ? (e) => {
-                      e.stopPropagation();
-                      setIsInvitationDetailsModalOpen(true);
-                    }
-                  : undefined
-              }
-            >
-              <Mail
-                size={9}
-                className={hasInternalRoleInvitation ? "text-orange-500" : "text-pink-500"}
-              />
-              {getFormattedDate() && <span>{getFormattedDate()}</span>}
-            </span>
-          </Tooltip>
-        )}
-        {teamInvitationRoleName && (
-          <Tooltip
-            content={teamInvitationRoleName}
-            wrapperClassName="inline-flex items-center gap-0.5"
-          >
-            <UserSearch size={9} className="flex-shrink-0 text-orange-500" />
-            <span>{teamInvitationRoleName}</span>
-          </Tooltip>
-        )}
-        {(effectiveVariant === "application" || isRoleApplicationVariant || pendingApplicationForTeam) && (
-          <Tooltip
-            content={
-              isCombinedApplication || isPendingCombinedApplicationForTeam
-                ? `You applied to join this team and fill a role${getFormattedDate() ? `\non ${format(new Date(normalizedData.date), "MMM d, yyyy")}` : ""}`
-                : isPendingInternalRoleApplicationForTeam
-                  ? "You applied for a role within this team"
-                  : `You applied${isRoleApplicationVariant ? " for this role" : " to join this team"}${
-                      getFormattedDate()
-                        ? `\non ${format(new Date(normalizedData.date), "MMM d, yyyy")}`
-                        : ""
-                    }`
-            }
-          >
-            <span
-              className="flex items-center gap-0.5 cursor-pointer"
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsApplicationModalOpen(true);
-              }}
-            >
-              <SendHorizontal size={9} className={
-                (isCombinedApplication || isPendingCombinedApplicationForTeam) ? "text-violet-500" :
-                (isRoleApplicationVariant || isPendingInternalRoleApplicationForTeam) ? "text-orange-500" :
-                "text-info"
-              } />
-              {getFormattedDate() && <span>{getFormattedDate()}</span>}
-            </span>
-          </Tooltip>
-        )}
-        {teamApplicationRoleName && (
-          <Tooltip
-            content={teamApplicationRoleName}
-            wrapperClassName="inline-flex items-center gap-0.5"
-          >
-            <UserSearch size={9} className="flex-shrink-0 text-orange-500" />
-            <span>{teamApplicationRoleName}</span>
-          </Tooltip>
-        )}
-        {shouldShowOpenRoleCount && openRoleCount > 0 && (
-          <Tooltip content={`${openRoleCount} open ${openRoleCount === 1 ? 'role' : 'roles'} posted in this team`}>
-            <span className="flex items-center">
-              <UserSearch size={9} className="text-orange-500 mr-0.5" />
-              <span>{openRoleCount}</span>
-            </span>
-          </Tooltip>
-        )}
-        {isRoleVariant && teamData._teamName && (
-          <Tooltip content="Click to view team details" wrapperClassName="inline-flex items-center gap-0.5">
-            <span
-              className="inline-flex items-center gap-0.5 cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); setIsModalOpen(true); }}
-            >
-              <Users size={9} className="flex-shrink-0 text-primary" />
-              <span>{teamData._teamName}</span>
-            </span>
-          </Tooltip>
-        )}
-        {userRole && effectiveVariant === "member" && (
-          <>
-            {userRole === "owner" && (
-              <Tooltip content="You are the owner of this team">
-                <Crown size={9} className="text-[var(--color-role-owner-bg)]" />
-              </Tooltip>
-            )}
-            {userRole === "admin" && (
-              <Tooltip content="You are an admin of this team">
-                <ShieldCheck size={9} className="text-[var(--color-role-admin-bg)]" />
-              </Tooltip>
-            )}
-            {userRole === "member" && !hideMemberRoleIcon && (
-              <Tooltip content="You are a member of this team">
-                <User size={9} className="text-[var(--color-role-member-bg)]" />
-              </Tooltip>
-            )}
-          </>
-        )}
-        {shouldShowVisibilityIcon() && (
-          <Tooltip content={teamData.is_public === true || teamData.isPublic === true ? "Public Team - visible for everyone" : "Private Team - only visible for Members"}>
-            {teamData.is_public === true || teamData.isPublic === true ? (
-              <EyeIcon size={9} className="text-green-600" />
-            ) : (
-              <EyeClosed size={9} className="text-gray-500" />
-            )}
-          </Tooltip>
-        )}
-        {showDemoIndicator && (
-          <Tooltip
-            content={demoTooltip}
-            wrapperClassName="inline-flex items-center whitespace-nowrap text-base-content/50"
-          >
-            <FlaskConical size={9} className="flex-shrink-0" />
-          </Tooltip>
-        )}
-      </span>
+      <TeamCardListSubtitle
+        scoreSubtitleItem={scoreSubtitleItem}
+        memberCountListItem={memberCountListItem}
+        effectiveVariant={effectiveVariant}
+        isRoleInvitationVariant={isRoleInvitationVariant}
+        isRoleApplicationVariant={isRoleApplicationVariant}
+        isRoleVariant={isRoleVariant}
+        pendingInvitationForTeam={pendingInvitationForTeam}
+        pendingApplicationForTeam={pendingApplicationForTeam}
+        hasInternalRoleInvitation={hasInternalRoleInvitation}
+        internalRoleInvitationTooltip={listInternalRoleInvitationTooltip}
+        formattedDate={listFormattedDate}
+        normalizedData={normalizedData}
+        setIsInvitationDetailsModalOpen={setIsInvitationDetailsModalOpen}
+        setIsApplicationModalOpen={setIsApplicationModalOpen}
+        setIsModalOpen={setIsModalOpen}
+        teamInvitationRoleName={teamInvitationRoleName}
+        teamApplicationRoleName={teamApplicationRoleName}
+        isCombinedApplication={isCombinedApplication}
+        isPendingCombinedApplicationForTeam={isPendingCombinedApplicationForTeam}
+        isPendingInternalRoleApplicationForTeam={isPendingInternalRoleApplicationForTeam}
+        shouldShowOpenRoleCount={shouldShowOpenRoleCount}
+        openRoleCount={openRoleCount}
+        teamData={teamData}
+        userRole={userRole}
+        hideMemberRoleIcon={hideMemberRoleIcon}
+        showVisibilityIcon={listShowVisibilityIcon}
+        showDemoIndicator={showDemoIndicator}
+        demoTooltip={demoTooltip}
+      />
     );
 
     return (
@@ -2494,303 +2385,54 @@ const TeamCard = ({
 
   // ============ Main Render ============
 
+  // Resolve the pure subtitle getters once so <TeamCardSubtitle> receives
+  // primitive props and its React.memo can bail out on unrelated re-renders.
+  const subtitleFormattedDate = getFormattedDate();
+  const subtitleRoleStatusTooltip = getRoleStatusTooltip();
+  const subtitleInternalRoleInvitationTooltip = getInternalRoleInvitationTooltip();
+  const subtitleMemberCount = getMemberCount();
+  const subtitleMaxMembers = getMaxMembers();
+  const subtitleShowVisibilityIcon = shouldShowVisibilityIcon();
+
   return (
     <>
       <Card
         title={cardTitle}
         subtitle={
-          <span
-            className={`mt-0.5 flex max-h-[2.75em] overflow-hidden items-center flex-wrap leading-[110%] text-base-content/70 ${viewMode === "mini" ? "text-xs gap-x-1 gap-y-px w-full" : "text-sm gap-x-1.5 gap-y-px"}`}
-          >
-            {scoreSubtitleItem}
-            {isRoleVariant && getFormattedDate() && (
-              <Tooltip content={getRoleStatusTooltip()}>
-                <span className="flex items-center gap-0.5 whitespace-nowrap">
-                  {isRoleInvitationVariant ? (
-                    <Mail
-                      size={viewMode === "mini" ? 10 : 13}
-                      className={`flex-shrink-0 ${hasInternalRoleInvitation ? "text-orange-500" : "text-pink-500"}`}
-                    />
-                  ) : (
-                    <SendHorizontal size={viewMode === "mini" ? 10 : 13} className="flex-shrink-0 text-orange-500" />
-                  )}
-                  <span>{getFormattedDate()}</span>
-                </span>
-              </Tooltip>
-            )}
-
-            {/* Members count for member search results */}
-            {!isRoleVariant && shouldShowMemberCountInSubtitle && (
-              <span className="flex items-center">
-                <Users
-                  size={viewMode === "mini" ? 10 : 13}
-                  className="text-primary mr-0.5"
-                />
-                <span>
-                  {getMemberCount()}/{getMaxMembers()}
-                </span>
-              </span>
-            )}
-
-            {/* Pending invitation indicator with date */}
-            {(effectiveVariant === "invitation" ||
-              pendingInvitationForTeam) && (
-              <Tooltip
-                content={
-                  hasInternalRoleInvitation
-                    ? getInternalRoleInvitationTooltip()
-                    : `You were invited to this team${
-                        getFormattedDate()
-                          ? `\non ${format(
-                              new Date(normalizedData.date),
-                              "MMM d, yyyy",
-                            )}`
-                          : ""
-                      }`
-                }
-              >
-                <span className="flex items-center gap-0.5 whitespace-nowrap">
-                  <Mail
-                    size={viewMode === "mini" ? 10 : 13}
-                    className={
-                      hasInternalRoleInvitation
-                        ? "text-orange-500"
-                        : "text-pink-500"
-                    }
-                  />
-                  {getFormattedDate() && (
-                    <span>{getFormattedDate()}</span>
-                  )}
-                </span>
-              </Tooltip>
-            )}
-            {teamInvitationRoleName && (
-              <Tooltip content={teamInvitationRoleName}>
-                {viewMode === "card" ? (
-                  <span className="flex items-center">
-                    <UserSearch
-                      size={13}
-                      className="text-orange-500"
-                    />
-                  </span>
-                ) : (
-                  <span className="flex items-start gap-1">
-                    <UserSearch
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-orange-500 flex-shrink-0 mt-0.5"
-                    />
-                    <span className="leading-[1.05]">{teamInvitationRoleName}</span>
-                  </span>
-                )}
-              </Tooltip>
-            )}
-
-            {/* Pending team application indicator (team-only = blue, combined = violet) */}
-            {(effectiveVariant === "application" ||
-              (pendingApplicationForTeam && !isPendingRoleApplicationForTeam)) && (
-              <Tooltip
-                content={
-                  isCombinedApplication
-                    ? `You applied to join this team and fill a role${getFormattedDate() ? `\non ${format(new Date(normalizedData.date), "MMM d, yyyy")}` : ""}`
-                    : `You applied to join this team${getFormattedDate() ? `\non ${format(new Date(normalizedData.date), "MMM d, yyyy")}` : ""}`
-                }
-              >
-                <span className="flex items-center gap-0.5 whitespace-nowrap">
-                  <SendHorizontal
-                    size={viewMode === "mini" ? 10 : 13}
-                    className={isCombinedApplication ? "text-violet-500" : "text-info"}
-                  />
-                  {getFormattedDate() && (
-                    <span>{getFormattedDate()}</span>
-                  )}
-                </span>
-              </Tooltip>
-            )}
-            {teamApplicationRoleName && (
-              <Tooltip content={teamApplicationRoleName}>
-                {viewMode === "card" ? (
-                  <span className="flex items-center">
-                    <UserSearch
-                      size={13}
-                      className="text-orange-500"
-                    />
-                  </span>
-                ) : (
-                  <span className="flex items-start gap-1">
-                    <UserSearch
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-orange-500 flex-shrink-0 mt-0.5"
-                    />
-                    <span className="leading-[1.05]">{teamApplicationRoleName}</span>
-                  </span>
-                )}
-              </Tooltip>
-            )}
-
-            {/* Team name for role variants */}
-            {isRoleVariant && teamData._teamName && (
-              <Tooltip content={teamData._teamName}>
-                {viewMode === "card" ? (
-                  <span
-                    className="flex items-center cursor-pointer"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsModalOpen(true);
-                    }}
-                  >
-                    <Users
-                      size={13}
-                      className="text-primary"
-                    />
-                  </span>
-                ) : (
-                  <span
-                    className="flex items-start gap-1 cursor-pointer"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsModalOpen(true);
-                    }}
-                  >
-                    <Users
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-primary flex-shrink-0 mt-0.5"
-                    />
-                    <span className="leading-[1.05]">{teamData._teamName}</span>
-                  </span>
-                )}
-              </Tooltip>
-            )}
-
-            {shouldMoveSearchResultRoleApplicationIndicator &&
-              isPendingRoleApplicationForTeam && (
-                <Tooltip content={isPendingCombinedApplicationForTeam ? "You applied to join this team and fill a role" : "You applied for a role within this team"}>
-                  <span className="flex items-center">
-                    <SendHorizontal
-                      size={viewMode === "mini" ? 10 : 13}
-                      className={isPendingCombinedApplicationForTeam ? "text-violet-500" : "text-orange-500"}
-                    />
-                  </span>
-                </Tooltip>
-              )}
-
-            {/* Open roles count */}
-            {shouldShowOpenRoleCount && openRoleCount > 0 && (
-              <Tooltip content={`${openRoleCount} open ${openRoleCount === 1 ? 'role' : 'roles'} posted in this team`}>
-                <span className="flex items-center">
-                  <UserSearch
-                    size={viewMode === "mini" ? 10 : 13}
-                    className="text-orange-500 mr-0.5"
-                  />
-                  <span>{openRoleCount}</span>
-                </span>
-              </Tooltip>
-            )}
-
-            {/* Privacy status */}
-            {shouldShowVisibilityIcon() && (
-              <Tooltip
-                content={
-                  teamData.is_public === true || teamData.isPublic === true
-                    ? "Public Team - visible for everyone"
-                    : "Private Team - only visible for Members"
-                }
-              >
-                {teamData.is_public === true || teamData.isPublic === true ? (
-                  <EyeIcon
-                    size={viewMode === "mini" ? 10 : 13}
-                    className="text-green-600"
-                  />
-                ) : (
-                  <EyeClosed
-                    size={viewMode === "mini" ? 10 : 13}
-                    className="text-gray-500"
-                  />
-                )}
-              </Tooltip>
-            )}
-
-            {/* Pending role application indicator */}
-            {!shouldMoveSearchResultRoleApplicationIndicator &&
-              isPendingRoleApplicationForTeam && (
-              <Tooltip content="You applied for a role within this team">
-                <span className="flex items-center">
-                  <SendHorizontal
-                    size={viewMode === "mini" ? 10 : 13}
-                    className="text-orange-500"
-                  />
-                </span>
-              </Tooltip>
-              )}
-
-            {/* User role - show for member variant when user has a role */}
-            {userRole && effectiveVariant === "member" &&
-              (userRole === "owner" || userRole === "admin" || (userRole === "member" && !hideMemberRoleIcon)) && (
-              <span className="flex items-center text-base-content/70">
-                {userRole === "owner" && (
-                  <Tooltip content="You are the owner of this team">
-                    <Crown
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-[var(--color-role-owner-bg)]"
-                    />
-                  </Tooltip>
-                )}
-                {userRole === "admin" && (
-                  <Tooltip content="You are an admin of this team">
-                    <ShieldCheck
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-[var(--color-role-admin-bg)]"
-                    />
-                  </Tooltip>
-                )}
-                {userRole === "member" && !hideMemberRoleIcon && (
-                  <Tooltip content="You are a member of this team">
-                    <User
-                      size={viewMode === "mini" ? 10 : 13}
-                      className="text-[var(--color-role-member-bg)]"
-                    />
-                  </Tooltip>
-                )}
-              </span>
-            )}
-
-            {/* Compact location in subtitle for mini cards — search results only (My Teams always shows location in body) */}
-            {viewMode === "mini" &&
-              !activeFilters.showLocation &&
-              isSearchResult &&
-              (teamData.city ||
-                teamData.country ||
-                teamData.is_remote ||
-                teamData.isRemote) && (
-                <span className="flex items-center gap-1">
-                  {teamData.is_remote || teamData.isRemote ? (
-                    <>
-                      <Globe size={10} className="flex-shrink-0" />
-                      <span>Remote</span>
-                    </>
-                  ) : (
-                    <>
-                      <MapPin size={10} className="flex-shrink-0" />
-                      <span>
-                        {[teamData.city, normalizeLocationData(teamData).countryName]
-                          .filter(Boolean)
-                          .join(", ")}
-                      </span>
-                    </>
-                  )}
-                </span>
-              )}
-            {showDemoIndicator && (
-              <Tooltip
-                content={demoTooltip}
-                wrapperClassName="flex items-center gap-1 text-base-content/50"
-              >
-                <FlaskConical
-                  size={viewMode === "mini" ? 10 : 13}
-                  className="flex-shrink-0"
-                />
-              </Tooltip>
-            )}
-          </span>
+          <TeamCardSubtitle
+            viewMode={viewMode}
+            scoreSubtitleItem={scoreSubtitleItem}
+            isRoleVariant={isRoleVariant}
+            isRoleInvitationVariant={isRoleInvitationVariant}
+            hasInternalRoleInvitation={hasInternalRoleInvitation}
+            formattedDate={subtitleFormattedDate}
+            roleStatusTooltip={subtitleRoleStatusTooltip}
+            internalRoleInvitationTooltip={subtitleInternalRoleInvitationTooltip}
+            shouldShowMemberCountInSubtitle={shouldShowMemberCountInSubtitle}
+            memberCount={subtitleMemberCount}
+            maxMembers={subtitleMaxMembers}
+            effectiveVariant={effectiveVariant}
+            pendingInvitationForTeam={pendingInvitationForTeam}
+            pendingApplicationForTeam={pendingApplicationForTeam}
+            isPendingRoleApplicationForTeam={isPendingRoleApplicationForTeam}
+            normalizedData={normalizedData}
+            teamInvitationRoleName={teamInvitationRoleName}
+            teamApplicationRoleName={teamApplicationRoleName}
+            isCombinedApplication={isCombinedApplication}
+            teamData={teamData}
+            setIsModalOpen={setIsModalOpen}
+            shouldMoveSearchResultRoleApplicationIndicator={shouldMoveSearchResultRoleApplicationIndicator}
+            isPendingCombinedApplicationForTeam={isPendingCombinedApplicationForTeam}
+            shouldShowOpenRoleCount={shouldShowOpenRoleCount}
+            openRoleCount={openRoleCount}
+            showVisibilityIcon={subtitleShowVisibilityIcon}
+            userRole={userRole}
+            hideMemberRoleIcon={hideMemberRoleIcon}
+            activeFilters={activeFilters}
+            isSearchResult={isSearchResult}
+            showDemoIndicator={showDemoIndicator}
+            demoTooltip={demoTooltip}
+          />
         }
         hoverable
         image={getTeamImage()}
@@ -3069,4 +2711,49 @@ const TeamCard = ({
   );
 };
 
-export default TeamCard;
+TeamCard.displayName = "TeamCard";
+
+// One-level shallow equality for plain objects / arrays.
+const shallowEqualOneLevel = (a, b) => {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const k of aKeys) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+};
+
+/**
+ * Custom React.memo comparator for TeamCard.
+ *
+ * SearchPage/MyTeams re-spread their result items (`{...t}`) and re-run
+ * `withViewerTeamRole` on every render, so object props (team/application/
+ * invitation/activeFilters/teamMemberBadges/roleMatchBadgeNames) get fresh
+ * wrappers each render even when nothing changed — but the copied inner values
+ * keep their references (they come from the stable query cache). A one-level
+ * shallow compare therefore bails safely: it returns equal only when every
+ * top-level value is identical, and errs toward re-rendering on any real
+ * change. Handlers/scalars are compared by identity, so callbacks must be
+ * referentially stable (useCallback) at the call sites for the bail to apply.
+ */
+const areTeamCardPropsEqual = (prev, next) => {
+  const prevKeys = Object.keys(prev);
+  if (prevKeys.length !== Object.keys(next).length) return false;
+  for (const key of prevKeys) {
+    const a = prev[key];
+    const b = next[key];
+    if (a === b) continue;
+    if (a && b && typeof a === "object" && typeof b === "object") {
+      if (shallowEqualOneLevel(a, b)) continue;
+      return false;
+    }
+    return false;
+  }
+  return true;
+};
+
+export default React.memo(TeamCard, areTeamCardPropsEqual);
