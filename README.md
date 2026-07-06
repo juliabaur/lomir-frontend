@@ -233,7 +233,7 @@ Lomir-frontend/
 │   │   ├── useUserQueries.js       # React Query hooks for user profile/tags/badges (useUserProfile, useUserTags, useUserBadges) + unwrap helpers
 │   │   ├── useTagQueries.js        # React Query hooks for structured tags
 │   │   ├── useBadgeQueries.js      # React Query hooks for badge catalog and shared-teams lookups
-│   │   ├── useTeamQueries.js       # React Query hooks for the paginated user-teams list and bulk member badges (MyTeams)
+│   │   ├── useTeamQueries.js       # React Query hooks/keys for teams: paginated user-teams list, bulk + per-team member badges, team detail (fetchTeamById), open-roles, and viewer team-role (MyTeams, SearchPage, TeamCard)
 │   │   ├── useSearchQueries.js     # React Query hook for the global search (SearchPage): whole criteria object as query key, keepPreviousData
 │   │   ├── useChatQueries.js       # React Query hooks for Chat: team-details cache + conversation list (staleTime: Infinity, socket-maintained)
 │   │   ├── useViewerMatchProfile.js # Viewer's tags/badges/location for client-side scoring
