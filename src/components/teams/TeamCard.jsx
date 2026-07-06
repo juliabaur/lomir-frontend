@@ -29,13 +29,20 @@ import TeamInvitationDetailsModal from "./TeamInvitationDetailsModal";
 import { useQueryClient } from "@tanstack/react-query";
 import { teamService } from "../../services/teamService";
 import { vacantRoleService } from "../../services/vacantRoleService";
-import { userService } from "../../services/userService";
 import useSocketEvents from "../../hooks/useSocketEvents";
 import useTeamRequestLists from "../../hooks/useTeamRequestLists";
 import {
   teamMemberBadgesByTeamQueryKey,
   fetchTeamById,
 } from "../../hooks/useTeamQueries";
+import {
+  userProfileQueryKey,
+  userTagsQueryKey,
+  userBadgesQueryKey,
+  fetchUserProfile,
+  fetchUserTags,
+  fetchUserBadges,
+} from "../../hooks/useUserQueries";
 import { useAuth } from "../../contexts/AuthContext";
 import Alert from "../common/Alert";
 import ConfirmModal from "../common/ConfirmModal";
@@ -55,10 +62,7 @@ import {
   formatListLocation,
   normalizeLocationData,
 } from "../../utils/locationUtils";
-import {
-  extractListPayload,
-  extractProfilePayload,
-} from "../../utils/payloadExtractors";
+import { extractProfilePayload } from "../../utils/payloadExtractors";
 import {
   buildBadgeLookup,
   buildTagLookup,
@@ -73,7 +77,6 @@ import {
 } from "../../utils/userHelpers";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
 
-const viewerRoleProfileCache = new Map();
 const teamOpenRolesCache = new Map();
 const EMPTY_ARRAY = [];
 
@@ -165,52 +168,41 @@ const extractBadgeRows = (payload) => {
   return [];
 };
 
-const getViewerRoleProfile = async (userId, fallbackUser = null) => {
-  const cacheKey = String(userId);
-  if (viewerRoleProfileCache.has(cacheKey)) {
-    return viewerRoleProfileCache.get(cacheKey);
-  }
+const getViewerRoleProfile = async (userId, fallbackUser = null, queryClient) => {
+  // Profile, tags, and badges are cached + deduped through React Query under the
+  // shared useUserQueries keys (staleTime Infinity mirrors the old per-session
+  // Map). The fetchUser* helpers already return the unwrapped user / tag rows /
+  // badge rows, so no further payload extraction is needed here.
+  const [profileRes, tagsRes, badgesRes] = await Promise.allSettled([
+    queryClient.fetchQuery({
+      queryKey: userProfileQueryKey(userId),
+      queryFn: () => fetchUserProfile(userId),
+      staleTime: Infinity,
+    }),
+    queryClient.fetchQuery({
+      queryKey: userTagsQueryKey(userId),
+      queryFn: () => fetchUserTags(userId),
+      staleTime: Infinity,
+    }),
+    queryClient.fetchQuery({
+      queryKey: userBadgesQueryKey(userId),
+      queryFn: () => fetchUserBadges(userId),
+      staleTime: Infinity,
+    }),
+  ]);
 
-  const request = (async () => {
-    const [profileRes, tagsRes, badgesRes] = await Promise.allSettled([
-      userService.getUserById(userId),
-      userService.getUserTags(userId),
-      userService.getUserBadges(userId),
-    ]);
+  const profileData = profileRes.status === "fulfilled" ? profileRes.value : null;
+  const tagData = tagsRes.status === "fulfilled" ? tagsRes.value : [];
+  const badgeData = badgesRes.status === "fulfilled" ? badgesRes.value : [];
 
-    const profileData =
-      profileRes.status === "fulfilled"
-        ? extractProfilePayload(profileRes.value)
-        : null;
-    const tagData =
-      tagsRes.status === "fulfilled"
-        ? extractListPayload(tagsRes.value)
-        : [];
-    const badgeData =
-      badgesRes.status === "fulfilled"
-        ? extractListPayload(badgesRes.value)
-        : [];
-
-    return {
-      user: {
-        ...(fallbackUser || {}),
-        ...(profileData || {}),
-      },
-      userTagMap: buildTagLookup(tagData),
-      userBadgeMap: buildBadgeLookup(badgeData),
-    };
-  })();
-
-  viewerRoleProfileCache.set(cacheKey, request);
-
-  try {
-    const result = await request;
-    viewerRoleProfileCache.set(cacheKey, Promise.resolve(result));
-    return result;
-  } catch (error) {
-    viewerRoleProfileCache.delete(cacheKey);
-    throw error;
-  }
+  return {
+    user: {
+      ...(fallbackUser || {}),
+      ...(profileData || {}),
+    },
+    userTagMap: buildTagLookup(tagData),
+    userBadgeMap: buildBadgeLookup(badgeData),
+  };
 };
 
 const getExplicitMatchScore = (item) => {
@@ -1312,7 +1304,11 @@ const TeamCard = ({
           return;
         }
 
-        const viewerProfile = await getViewerRoleProfile(user.id, user);
+        const viewerProfile = await getViewerRoleProfile(
+          user.id,
+          user,
+          queryClient,
+        );
         let effectiveRole = roleData ?? null;
 
         if (!roleHasPreloadedRequirements) {
@@ -1355,6 +1351,7 @@ const TeamCard = ({
     roleHasPreloadedRequirements,
     roleTeamId,
     user?.id,
+    queryClient,
   ]);
 
   // ================= GUARD CLAUSE – AFTER ALL HOOKS =================
