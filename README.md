@@ -173,7 +173,11 @@ Lomir-frontend/
 │   │   │                           #   TeamApplicationButton, TeamApplicationModal,
 │   │   │                           #   TeamApplicationsModal, TeamApplicationDetailsModal,
 │   │   │                           #   TeamInviteModal, TeamInvitesModal,
-│   │   │                           #   TeamInvitationDetailsModal, RequestRoleCard
+│   │   │                           #   TeamInvitationDetailsModal, RequestRoleCard.
+│   │   │                           #   TeamCard is wrapped in React.memo (custom comparator) and
+│   │   │                           #   its subtitle-indicator rows are extracted to memoized
+│   │   │                           #   TeamCardSubtitle / TeamCardListSubtitle + shared
+│   │   │                           #   TeamCardIndicators (open-roles / visibility / demo)
 │   │   ├── users/                  # UserCard, UserDetailsModal, UserAvatar,
 │   │   │                           #   UserProfileHeaderSection (avatar + name + location header),
 │   │   │                           #   UserBioSection, InlineUserLink, BlocklistSection,
