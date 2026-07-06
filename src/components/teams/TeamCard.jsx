@@ -26,11 +26,25 @@ import TeamApplicationDetailsModal from "./TeamApplicationDetailsModal";
 import VacantRoleDetailsModal from "./VacantRoleDetailsModalLazy";
 import TeamInvitesModal from "./TeamInvitesModal";
 import TeamInvitationDetailsModal from "./TeamInvitationDetailsModal";
+import { useQueryClient } from "@tanstack/react-query";
 import { teamService } from "../../services/teamService";
 import { vacantRoleService } from "../../services/vacantRoleService";
-import { userService } from "../../services/userService";
 import useSocketEvents from "../../hooks/useSocketEvents";
 import useTeamRequestLists from "../../hooks/useTeamRequestLists";
+import {
+  teamMemberBadgesByTeamQueryKey,
+  teamOpenRolesQueryKey,
+  teamUserRoleQueryKey,
+  fetchTeamById,
+} from "../../hooks/useTeamQueries";
+import {
+  userProfileQueryKey,
+  userTagsQueryKey,
+  userBadgesQueryKey,
+  fetchUserProfile,
+  fetchUserTags,
+  fetchUserBadges,
+} from "../../hooks/useUserQueries";
 import { useAuth } from "../../contexts/AuthContext";
 import Alert from "../common/Alert";
 import ConfirmModal from "../common/ConfirmModal";
@@ -50,10 +64,7 @@ import {
   formatListLocation,
   normalizeLocationData,
 } from "../../utils/locationUtils";
-import {
-  extractListPayload,
-  extractProfilePayload,
-} from "../../utils/payloadExtractors";
+import { extractProfilePayload } from "../../utils/payloadExtractors";
 import {
   buildBadgeLookup,
   buildTagLookup,
@@ -68,9 +79,6 @@ import {
 } from "../../utils/userHelpers";
 import DemoAvatarOverlay from "../users/DemoAvatarOverlay";
 
-const teamMemberBadgesCache = new Map();
-const viewerRoleProfileCache = new Map();
-const teamOpenRolesCache = new Map();
 const EMPTY_ARRAY = [];
 
 const extractArrayPayload = (payload) => {
@@ -161,52 +169,41 @@ const extractBadgeRows = (payload) => {
   return [];
 };
 
-const getViewerRoleProfile = async (userId, fallbackUser = null) => {
-  const cacheKey = String(userId);
-  if (viewerRoleProfileCache.has(cacheKey)) {
-    return viewerRoleProfileCache.get(cacheKey);
-  }
+const getViewerRoleProfile = async (userId, fallbackUser = null, queryClient) => {
+  // Profile, tags, and badges are cached + deduped through React Query under the
+  // shared useUserQueries keys (staleTime Infinity mirrors the old per-session
+  // Map). The fetchUser* helpers already return the unwrapped user / tag rows /
+  // badge rows, so no further payload extraction is needed here.
+  const [profileRes, tagsRes, badgesRes] = await Promise.allSettled([
+    queryClient.fetchQuery({
+      queryKey: userProfileQueryKey(userId),
+      queryFn: () => fetchUserProfile(userId),
+      staleTime: Infinity,
+    }),
+    queryClient.fetchQuery({
+      queryKey: userTagsQueryKey(userId),
+      queryFn: () => fetchUserTags(userId),
+      staleTime: Infinity,
+    }),
+    queryClient.fetchQuery({
+      queryKey: userBadgesQueryKey(userId),
+      queryFn: () => fetchUserBadges(userId),
+      staleTime: Infinity,
+    }),
+  ]);
 
-  const request = (async () => {
-    const [profileRes, tagsRes, badgesRes] = await Promise.allSettled([
-      userService.getUserById(userId),
-      userService.getUserTags(userId),
-      userService.getUserBadges(userId),
-    ]);
+  const profileData = profileRes.status === "fulfilled" ? profileRes.value : null;
+  const tagData = tagsRes.status === "fulfilled" ? tagsRes.value : [];
+  const badgeData = badgesRes.status === "fulfilled" ? badgesRes.value : [];
 
-    const profileData =
-      profileRes.status === "fulfilled"
-        ? extractProfilePayload(profileRes.value)
-        : null;
-    const tagData =
-      tagsRes.status === "fulfilled"
-        ? extractListPayload(tagsRes.value)
-        : [];
-    const badgeData =
-      badgesRes.status === "fulfilled"
-        ? extractListPayload(badgesRes.value)
-        : [];
-
-    return {
-      user: {
-        ...(fallbackUser || {}),
-        ...(profileData || {}),
-      },
-      userTagMap: buildTagLookup(tagData),
-      userBadgeMap: buildBadgeLookup(badgeData),
-    };
-  })();
-
-  viewerRoleProfileCache.set(cacheKey, request);
-
-  try {
-    const result = await request;
-    viewerRoleProfileCache.set(cacheKey, Promise.resolve(result));
-    return result;
-  } catch (error) {
-    viewerRoleProfileCache.delete(cacheKey);
-    throw error;
-  }
+  return {
+    user: {
+      ...(fallbackUser || {}),
+      ...(profileData || {}),
+    },
+    userTagMap: buildTagLookup(tagData),
+    userBadgeMap: buildBadgeLookup(badgeData),
+  };
 };
 
 const getExplicitMatchScore = (item) => {
@@ -623,6 +620,7 @@ const TeamCard = ({
   const [teamData, setTeamData] = useState(normalizedData.team);
   const [freshOpenRoleSnapshot, setFreshOpenRoleSnapshot] = useState(null);
   const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
   const [isApplicationsModalOpen, setIsApplicationsModalOpen] = useState(false);
   const [isInvitesModalOpen, setIsInvitesModalOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
@@ -726,17 +724,16 @@ const TeamCard = ({
     }
 
     let isActive = true;
-    const cacheKey = String(teamData.id);
-    let openRolesRequest = teamOpenRolesCache.get(cacheKey);
 
-    if (!openRolesRequest) {
-      openRolesRequest = vacantRoleService
-        .getVacantRoles(teamData.id, "open")
-        .then((response) => extractArrayPayload(response).filter(isOpenRole));
-      teamOpenRolesCache.set(cacheKey, openRolesRequest);
-    }
-
-    openRolesRequest
+    queryClient
+      .fetchQuery({
+        queryKey: teamOpenRolesQueryKey(teamData.id),
+        queryFn: () =>
+          vacantRoleService
+            .getVacantRoles(teamData.id, "open")
+            .then((response) => extractArrayPayload(response).filter(isOpenRole)),
+        staleTime: Infinity,
+      })
       .then((roles) => {
         if (!isActive) return;
 
@@ -748,7 +745,11 @@ const TeamCard = ({
         });
       })
       .catch((error) => {
-        teamOpenRolesCache.delete(cacheKey);
+        // Drop the cached rejection so a later mount can retry cleanly (mirrors
+        // the old Map delete-on-error).
+        queryClient.removeQueries({
+          queryKey: teamOpenRolesQueryKey(teamData.id),
+        });
         if (!isActive) return;
         console.warn("Could not fetch current open roles for team card:", error);
         setFreshOpenRoleSnapshot(null);
@@ -766,6 +767,7 @@ const TeamCard = ({
     teamData?.open_roles_count,
     teamData?.openRoleNames,
     teamData?.open_role_names,
+    queryClient,
   ]);
 
   //   // Fetch user's role in this team (only for member variant)
@@ -821,16 +823,22 @@ const TeamCard = ({
       }
 
       try {
-        const response = await teamService.getUserRoleInTeam(
-          teamData.id,
-          user.id,
-        );
-
-        const payload = response?.data;
-        const data = payload?.data ?? payload; // supports both shapes
-
-        const isMember = data?.isMember ?? payload?.isMember;
-        const role = data?.role ?? payload?.role ?? null;
+        const { isMember, role } = await queryClient.fetchQuery({
+          queryKey: teamUserRoleQueryKey(teamData.id, user.id),
+          queryFn: async () => {
+            const response = await teamService.getUserRoleInTeam(
+              teamData.id,
+              user.id,
+            );
+            const payload = response?.data;
+            const data = payload?.data ?? payload; // supports both shapes
+            return {
+              isMember: data?.isMember ?? payload?.isMember,
+              role: data?.role ?? payload?.role ?? null,
+            };
+          },
+          staleTime: Infinity,
+        });
 
         if (isMember === false) {
           setUserRole(null);
@@ -852,6 +860,7 @@ const TeamCard = ({
     teamData?.userRole,
     teamData?.user_role,
     effectiveVariant,
+    queryClient,
   ]);
 
   // Counts may be preloaded by the parent's list response (getUserTeams).
@@ -1015,29 +1024,26 @@ const TeamCard = ({
 
       try {
         const teamByIdPromise = shouldFetchTeamById
-          ? teamService.getTeamById(teamData.id)
+          ? fetchTeamById(queryClient, teamData.id)
           : Promise.resolve(null);
 
         const memberBadgesPromise = shouldFetchMemberBadges
-          ? (() => {
-              const cached = teamMemberBadgesCache.get(teamData.id);
-              if (cached) return Promise.resolve(cached);
-
-              return teamService
-                .getTeamMemberBadges(teamData.id)
-                .then((badgesResponse) => {
-                  const badges = extractBadgeRows(badgesResponse);
-                  teamMemberBadgesCache.set(teamData.id, badges);
-                  return badges;
-                })
-                .catch((badgeError) => {
-                  console.warn(
-                    "Could not fetch team member badges for card display:",
-                    badgeError,
-                  );
-                  return [];
-                });
-            })()
+          ? queryClient
+              .fetchQuery({
+                queryKey: teamMemberBadgesByTeamQueryKey(teamData.id),
+                queryFn: async () =>
+                  extractBadgeRows(
+                    await teamService.getTeamMemberBadges(teamData.id),
+                  ),
+                staleTime: Infinity,
+              })
+              .catch((badgeError) => {
+                console.warn(
+                  "Could not fetch team member badges for card display:",
+                  badgeError,
+                );
+                return [];
+              })
           : Promise.resolve(
               hasDisplayableBadges(teamData.badges) ? teamData.badges : [],
             );
@@ -1047,7 +1053,9 @@ const TeamCard = ({
           memberBadgesPromise,
         ]);
 
-        const fullTeam = response?.data?.data ?? response?.data ?? null;
+        // fetchTeamById resolves to the unwrapped team payload (or null when
+        // the fetch was skipped), so no envelope unwrapping is needed here.
+        const fullTeam = response ?? null;
 
         setTeamData((prev) => {
           const baseTeam = fullTeam ?? prev;
@@ -1110,10 +1118,9 @@ const TeamCard = ({
     if (teamData.latitude != null) return;
 
     let active = true;
-    teamService.getTeamById(teamData.id)
-      .then((response) => {
+    fetchTeamById(queryClient, teamData.id)
+      .then((fullTeam) => {
         if (!active) return;
-        const fullTeam = response?.data?.data ?? response?.data ?? null;
         if (!fullTeam) return;
         const lat = fullTeam.latitude ?? fullTeam.lat ?? null;
         const lng = fullTeam.longitude ?? fullTeam.lng ?? fullTeam.lon ?? null;
@@ -1122,7 +1129,7 @@ const TeamCard = ({
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [isRoleVariant, teamData?.id]);
+  }, [isRoleVariant, teamData?.id, queryClient]);
 
   // Sync parent-managed member badges into teamData. When the parent provides
   // an array (bulk fetch resolved), we use it directly. While the parent is
@@ -1309,7 +1316,11 @@ const TeamCard = ({
           return;
         }
 
-        const viewerProfile = await getViewerRoleProfile(user.id, user);
+        const viewerProfile = await getViewerRoleProfile(
+          user.id,
+          user,
+          queryClient,
+        );
         let effectiveRole = roleData ?? null;
 
         if (!roleHasPreloadedRequirements) {
@@ -1352,6 +1363,7 @@ const TeamCard = ({
     roleHasPreloadedRequirements,
     roleTeamId,
     user?.id,
+    queryClient,
   ]);
 
   // ================= GUARD CLAUSE – AFTER ALL HOOKS =================
@@ -1678,9 +1690,10 @@ const TeamCard = ({
   const handleModalClose = async () => {
     if (effectiveVariant === "member") {
       try {
-        const response = await teamService.getTeamById(teamData.id);
-        if (response && response.data) {
-          const fullTeam = response?.data?.data ?? response?.data;
+        const fullTeam = await fetchTeamById(queryClient, teamData.id, {
+          force: true,
+        });
+        if (fullTeam) {
           // Normalize is_public to ensure it's a boolean
           const normalizedTeam = {
             ...fullTeam,
@@ -1746,23 +1759,28 @@ const TeamCard = ({
     const result = await teamService.handleTeamApplication(applicationId, action, response, fillRole);
     await fetchPendingApplications();
     if (onUpdate) {
-      const updatedTeam = await teamService.getTeamById(teamData.id);
-      onUpdate(updatedTeam.data);
+      const updatedTeam = await fetchTeamById(queryClient, teamData.id, {
+        force: true,
+      });
+      onUpdate(updatedTeam);
     }
     return result;
   };
 
   const handleVacantRoleStatusChange = async () => {
     if (teamData?.id != null) {
-      teamOpenRolesCache.delete(String(teamData.id));
+      queryClient.removeQueries({
+        queryKey: teamOpenRolesQueryKey(teamData.id),
+      });
       setFreshOpenRoleSnapshot(null);
     }
 
     await fetchPendingApplications();
 
     try {
-      const response = await teamService.getTeamById(teamData.id);
-      const fullTeam = response?.data?.data ?? response?.data;
+      const fullTeam = await fetchTeamById(queryClient, teamData.id, {
+        force: true,
+      });
 
       if (!fullTeam) return;
 
