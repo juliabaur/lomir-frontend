@@ -748,7 +748,7 @@ const ConversationList = ({
                       demoOverlayTextTranslateClassName="-translate-y-[2px]"
                     />
                   )}
-                  {(conversation.unreadCount || conversation.unread_count) > 0 && (
+                  {(conversation.unreadCount ?? conversation.unread_count ?? 0) > 0 && (
                     <CountBadge
                       count={conversation.unreadCount ?? conversation.unread_count}
                       className="absolute -top-1 -left-2 z-10"

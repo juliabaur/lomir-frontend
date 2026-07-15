@@ -173,7 +173,11 @@ Lomir-frontend/
 │   │   │                           #   TeamApplicationButton, TeamApplicationModal,
 │   │   │                           #   TeamApplicationsModal, TeamApplicationDetailsModal,
 │   │   │                           #   TeamInviteModal, TeamInvitesModal,
-│   │   │                           #   TeamInvitationDetailsModal, RequestRoleCard
+│   │   │                           #   TeamInvitationDetailsModal, RequestRoleCard.
+│   │   │                           #   TeamCard is wrapped in React.memo (custom comparator) and
+│   │   │                           #   its subtitle-indicator rows are extracted to memoized
+│   │   │                           #   TeamCardSubtitle / TeamCardListSubtitle + shared
+│   │   │                           #   TeamCardIndicators (open-roles / visibility / demo)
 │   │   ├── users/                  # UserCard, UserDetailsModal, UserAvatar,
 │   │   │                           #   UserProfileHeaderSection (avatar + name + location header),
 │   │   │                           #   UserBioSection, InlineUserLink, BlocklistSection,
@@ -233,7 +237,7 @@ Lomir-frontend/
 │   │   ├── useUserQueries.js       # React Query hooks for user profile/tags/badges (useUserProfile, useUserTags, useUserBadges) + unwrap helpers
 │   │   ├── useTagQueries.js        # React Query hooks for structured tags
 │   │   ├── useBadgeQueries.js      # React Query hooks for badge catalog and shared-teams lookups
-│   │   ├── useTeamQueries.js       # React Query hooks for the paginated user-teams list and bulk member badges (MyTeams)
+│   │   ├── useTeamQueries.js       # React Query hooks/keys for teams: paginated user-teams list, bulk + per-team member badges, team detail (fetchTeamById), open-roles, and viewer team-role (MyTeams, SearchPage, TeamCard)
 │   │   ├── useSearchQueries.js     # React Query hook for the global search (SearchPage): whole criteria object as query key, keepPreviousData
 │   │   ├── useChatQueries.js       # React Query hooks for Chat: team-details cache + conversation list (staleTime: Infinity, socket-maintained)
 │   │   ├── useViewerMatchProfile.js # Viewer's tags/badges/location for client-side scoring
@@ -248,6 +252,10 @@ Lomir-frontend/
 │   │   ├── useMyTeamsSort.js       # Sort state for MyTeams page
 │   │   ├── useClientPagination.js  # Client-side pagination state for lists
 │   │   ├── useSocketEvents.js      # Subscribe to a set of Socket.IO events with React-safe cleanup
+│   │   ├── useChatTyping.js        # Chat typing indicator state, timeout cleanup, and user-name resolution
+│   │   ├── useChatSocketEvents.js  # Chat Socket.IO event wiring for messages, read status, membership, and conversation updates
+│   │   ├── useChatSearchState.js   # Chat search query state, message indexing, filtering, and no-result feedback
+│   │   ├── useActiveChatConversation.js # Active chat loading, join/read marking, highlights, and earlier-message pagination
 │   │   ├── useAwardModals.js       # Badge award modal state management (user profile context)
 │   │   ├── useTeamAwardModals.js   # Badge award modal state management (team context)
 │   │   └── useTheme.js             # Theme toggle state
@@ -365,6 +373,8 @@ The chat page supports both direct (1-to-1) and team group conversations.
 - Messages are delivered in real time via Socket.IO
 - Typing indicators and read receipts are shown per conversation
 - Messages can be replied to, edited, and soft-deleted; deleted messages show a placeholder
+- Typing indicator state is isolated in `useChatTyping`; Socket.IO event wiring is isolated in `useChatSocketEvents`; chat search state and message indexing are isolated in `useChatSearchState`; active conversation loading and earlier-message pagination are isolated in `useActiveChatConversation`; `Chat.jsx` still owns conversation selection and send/edit/delete actions
+- The conversation list is cached per authenticated user, empty direct chats stay transient until the first message is sent, and revoked/deleted team access is removed from the list without repeated failing fetches
 
 **Archived (deleted) team chats**
 - When an owner deletes a team that still has other members, the team is archived (scheduled for deletion) and the chat stays open as a "farewell" window — remaining members can still read and post until they leave or the grace period (14 days) elapses
@@ -410,7 +420,6 @@ The chat page supports both direct (1-to-1) and team group conversations.
 ## Related
 
 - **Backend repo:** [Lomir-backend](https://github.com/KasparSinitsin/Lomir-backend)
-- **Account deletion spec:** Backend repo → `docs/USER_DELETION_SPEC.md`
 
 ---
 

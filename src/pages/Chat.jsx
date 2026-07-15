@@ -1,785 +1,62 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   LogOut,
-  Archive,
-  ChevronRight,
-  ChevronLeft,
-  Users,
-  User,
   Trash2,
   Search,
   X,
-  FlaskConical,
 } from "lucide-react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { fetchTeamById } from "../hooks/useTeamQueries";
-import { useConversations, conversationsQueryKey } from "../hooks/useChatQueries";
+import {
+  useConversations,
+  conversationsQueryKey,
+  getConversationsQueryKey,
+} from "../hooks/useChatQueries";
 import PageContainer from "../components/layout/PageContainer";
-import ConversationList from "../components/chat/ConversationList";
-import MessageDisplay from "../components/chat/MessageDisplay";
-import { parseSystemMessage } from "../utils/messageSystemParser";
-import MessageInput from "../components/chat/MessageInput";
+import ConversationSidebar from "../components/chat/ConversationSidebar";
+import MessageArea from "../components/chat/MessageArea";
 import { useAuth } from "../contexts/AuthContext";
 import { messageService } from "../services/messageService";
-import socketService from "../services/socketService";
-import useSocketEvents from "../hooks/useSocketEvents";
+import useChatTyping from "../hooks/useChatTyping";
+import useChatSocketEvents from "../hooks/useChatSocketEvents";
+import useChatSearchState from "../hooks/useChatSearchState";
+import useChatTeamAccess from "../hooks/useChatTeamAccess";
+import useChatMessageActions from "../hooks/useChatMessageActions";
+import useActiveChatConversation from "../hooks/useActiveChatConversation";
 import { userService } from "../services/userService";
 import { isQuietError } from "../services/api";
-import { teamService } from "../services/teamService";
 import ScreenAlert from "../components/common/ScreenAlert";
 import Button from "../components/common/Button";
 import Modal from "../components/common/Modal";
-import Tooltip from "../components/common/Tooltip";
-import { CountBadge } from "../components/common/NotificationBadge";
-import { uploadToImageKit } from "../config/imagekit";
-import UserAvatar from "../components/users/UserAvatar";
-import TeamAvatar from "../components/teams/TeamAvatar";
 import TeamDetailsModal from "../components/teams/TeamDetailsModal";
 import UserDetailsModal from "../components/users/UserDetailsModal";
-import { isSyntheticTeam, isSyntheticUser, DEMO_PROFILE_TOOLTIP, DEMO_TEAM_TOOLTIP } from "../utils/userHelpers";
-import { formatDisplayName } from "../utils/nameFormatters";
 import {
-  formatRelativeChatTimestamp,
-  normalizeTimestampToDate,
   formatArchiveTimeRemaining,
   msUntilNextArchiveChange,
 } from "../utils/dateHelpers";
-import { getMessageConversationTarget } from "../utils/messageNotificationUtils";
-
-const getConversationPartnerId = (conversation) =>
-  conversation?.partner?.id ??
-  conversation?.partnerUser?.id ??
-  conversation?.partnerId ??
-  conversation?.partner_id ??
-  null;
-
-const resolveTypingUserId = (payload) =>
-  payload?.userId ??
-  payload?.user_id ??
-  payload?.senderId ??
-  payload?.sender_id ??
-  payload?.id ??
-  null;
-
-const resolveTypingDisplayName = (payload) => {
-  const first = payload?.firstName || payload?.first_name || "";
-  const last = payload?.lastName || payload?.last_name || "";
-  const fullName = `${first} ${last}`.trim();
-  return fullName || payload?.username || payload?.userName || payload?.name || null;
-};
-
-const resolveConversationUser = (conversation, userId) => {
-  if (!conversation || !userId) return null;
-
-  if (conversation.type === "direct") {
-    const partner = conversation.partner || conversation.partnerUser;
-    if (
-      partner &&
-      String(getConversationPartnerId(conversation)) === String(userId)
-    ) {
-      return partner;
-    }
-  }
-
-  if (conversation.type === "team") {
-    const members = conversation.team?.members || conversation.members || [];
-    const matchedMember = members.find((member) => {
-      const memberUser = member.user || member;
-      const memberId =
-        member?.userId ??
-        member?.user_id ??
-        memberUser?.userId ??
-        memberUser?.user_id ??
-        memberUser?.id ??
-        member?.id ??
-        null;
-      return String(memberId) === String(userId);
-    });
-
-    if (matchedMember) {
-      return matchedMember.user || matchedMember;
-    }
-  }
-
-  return null;
-};
-
-const getTeamMemberUserId = (member) => {
-  const memberUser = member?.user || member;
-  return (
-    member?.userId ??
-    member?.user_id ??
-    memberUser?.userId ??
-    memberUser?.user_id ??
-    memberUser?.id ??
-    member?.id ??
-    null
-  );
-};
-
-const isActiveTeamMemberRow = (member) => {
-  if (!member) return false;
-
-  const rawStatus =
-    member.membershipStatus ??
-    member.membership_status ??
-    member.memberStatus ??
-    member.member_status ??
-    member.status ??
-    null;
-  const status = String(rawStatus ?? "").trim().toLowerCase();
-
-  if (
-    status &&
-    ["removed", "left", "former", "inactive", "deleted"].includes(status)
-  ) {
-    return false;
-  }
-
-  return !(
-    member.removedAt ||
-    member.removed_at ||
-    member.leftAt ||
-    member.left_at ||
-    member.deletedAt ||
-    member.deleted_at
-  );
-};
-
-const isUserTeamMember = (members, userId) => {
-  if (userId == null) return false;
-  if (!Array.isArray(members)) return false;
-
-  return members.some((member) => {
-    if (!isActiveTeamMemberRow(member)) return false;
-
-    const memberId = getTeamMemberUserId(member);
-    return memberId != null && String(memberId) === String(userId);
-  });
-};
-
-const getPayloadTeamId = (payload) =>
-  payload?.teamId ??
-  payload?.team_id ??
-  payload?.team?.id ??
-  payload?.data?.teamId ??
-  payload?.data?.team_id ??
-  payload?.metadata?.teamId ??
-  payload?.metadata?.team_id ??
-  null;
-
-const getPayloadType = (payload) =>
-  String(
-    payload?.type ??
-      payload?.notificationType ??
-      payload?.notification_type ??
-      payload?.eventType ??
-      payload?.event_type ??
-      payload?.data?.type ??
-      payload?.metadata?.type ??
-      "",
-  ).toLowerCase();
-
-const getRemovedMemberIdFromPayload = (payload) =>
-  payload?.memberId ??
-  payload?.member_id ??
-  payload?.removedUserId ??
-  payload?.removed_user_id ??
-  payload?.targetUserId ??
-  payload?.target_user_id ??
-  payload?.data?.memberId ??
-  payload?.data?.member_id ??
-  payload?.metadata?.memberId ??
-  payload?.metadata?.member_id ??
-  null;
-
-const getPayloadText = (payload) =>
-  [
-    payload?.message,
-    payload?.content,
-    payload?.text,
-    payload?.body,
-    payload?.title,
-    payload?.data?.message,
-    payload?.data?.content,
-    payload?.metadata?.message,
-    payload?.metadata?.content,
-  ]
-    .filter((value) => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
-
-const isCurrentUserRemovalPayload = (payload, userId) => {
-  const type = getPayloadType(payload);
-  if (!type.includes("member_removed") && !type.includes("removed")) {
-    return false;
-  }
-
-  const removedMemberId = getRemovedMemberIdFromPayload(payload);
-  if (removedMemberId != null && String(removedMemberId) === String(userId)) {
-    return true;
-  }
-
-  const text = getPayloadText(payload);
-  return /\byou\b/.test(text) && /removed from/.test(text);
-};
-
-const mergeTeamDetailsIntoConversationData = (conversationData, teamPayload) => {
-  if (!conversationData || !teamPayload) return conversationData;
-
-  const currentTeam = conversationData.team || {};
-  const archivedAt =
-    currentTeam.archivedAt ??
-    currentTeam.archived_at ??
-    teamPayload.archivedAt ??
-    teamPayload.archived_at ??
-    undefined;
-  const status = currentTeam.status ?? teamPayload.status ?? undefined;
-
-  return {
-    ...conversationData,
-    team: {
-      ...currentTeam,
-      archived_at: currentTeam.archived_at ?? teamPayload.archived_at ?? archivedAt,
-      archivedAt,
-      status,
-      avatarUrl:
-        currentTeam.avatarUrl ||
-        currentTeam.teamavatarUrl ||
-        currentTeam.teamavatar_url ||
-        teamPayload.avatarUrl ||
-        teamPayload.teamavatarUrl ||
-        teamPayload.teamavatar_url,
-      isSynthetic:
-        currentTeam.isSynthetic ??
-        currentTeam.is_synthetic ??
-        teamPayload.isSynthetic ??
-        teamPayload.is_synthetic ??
-        undefined,
-      is_synthetic:
-        currentTeam.is_synthetic ??
-        currentTeam.isSynthetic ??
-        teamPayload.is_synthetic ??
-        teamPayload.isSynthetic ??
-        undefined,
-      members: Array.isArray(teamPayload.members)
-        ? teamPayload.members
-        : currentTeam.members,
-    },
-  };
-};
-
-const isArchivedTeamData = (team) =>
-  Boolean(team?.archived_at || team?.archivedAt || team?.status === "inactive");
-
-const getConversationUpdatedAt = (conversation) => {
-  const timestamp =
-    conversation?.updatedAt ??
-    conversation?.updated_at ??
-    conversation?.createdAt ??
-    conversation?.created_at ??
-    conversation?.lastMessage?.createdAt ??
-    conversation?.lastMessage?.created_at ??
-    conversation?.team?.updatedAt ??
-    conversation?.team?.updated_at ??
-    null;
-
-  if (!timestamp) return null;
-  const parsedDate = normalizeTimestampToDate(timestamp);
-  return parsedDate;
-};
-
-const isDirectConversationForPartner = (conversation, partnerId) =>
-  conversation?.type === "direct" &&
-  String(getConversationPartnerId(conversation)) === String(partnerId);
+import {
+  getConversationPartnerId,
+  isActiveTeamMemberRow,
+  isUserTeamMember,
+  isArchivedTeamData,
+  getConversationUpdatedAt,
+  dedupeMessages,
+} from "../utils/chatHelpers";
+import {
+  dedupeConversations,
+  hydrateConversationPreviews,
+} from "../utils/chatSearch";
 
 // Stable empty fallback so the conversations query's default never changes
 // identity between renders (avoids needless re-renders / effect re-runs).
 const EMPTY_CONVERSATIONS = [];
-
-const CHAT_SEARCH_PAGE_SIZE = 100;
-const CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION = 500;
-
-const dedupeConversations = (list) =>
-  (list || []).filter((conv, index, self) => {
-    if (conv.type === "direct") {
-      return (
-        index ===
-        self.findIndex((candidate) =>
-          isDirectConversationForPartner(
-            candidate,
-            getConversationPartnerId(conv),
-          ),
-        )
-      );
-    }
-
-    return index === self.findIndex((candidate) => candidate.id === conv.id);
-  });
-
-const getConversationSearchKey = (conversation) =>
-  `${conversation?.type || "direct"}:${conversation?.id}`;
-
-const normalizeChatSearchText = (value) =>
-  String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-const countChatSearchMatches = (value, normalizedQuery) => {
-  if (!value || !normalizedQuery) return 0;
-
-  let count = 0;
-  let startIndex = 0;
-
-  while (startIndex < value.length) {
-    const matchIndex = value.indexOf(normalizedQuery, startIndex);
-    if (matchIndex === -1) break;
-
-    count += 1;
-    startIndex = matchIndex + normalizedQuery.length;
-  }
-
-  return count;
-};
-
-const addSearchPart = (parts, value) => {
-  if (value == null) return;
-
-  if (Array.isArray(value)) {
-    value.forEach((item) => addSearchPart(parts, item));
-    return;
-  }
-
-  if (typeof value === "object") return;
-
-  const text = String(value).trim();
-  if (text) parts.push(text);
-};
-
-const addUserSearchParts = (parts, user) => {
-  if (!user) return;
-  const hasUserText =
-    user.name ||
-    user.username ||
-    user.userName ||
-    user.firstName ||
-    user.first_name ||
-    user.lastName ||
-    user.last_name;
-
-  if (!hasUserText) return;
-
-  addSearchPart(parts, [
-    user.name,
-    user.username,
-    user.userName,
-    user.firstName,
-    user.first_name,
-    user.lastName,
-    user.last_name,
-    formatDisplayName(user),
-  ]);
-};
-
-const buildMessageSearchText = (message) => {
-  const parts = [];
-  const parsedSystemMessage = parseSystemMessage(message?.content);
-  const systemMessageText = buildSystemMessageSearchSnippet(parsedSystemMessage);
-
-  addSearchPart(parts, [
-    message?.content,
-    systemMessageText,
-    message?.fileName,
-    message?.file_name,
-    message?.senderUsername,
-    message?.sender_username,
-  ]);
-  addUserSearchParts(parts, message?.sender);
-  addUserSearchParts(parts, {
-    firstName: message?.senderFirstName,
-    first_name: message?.sender_first_name,
-    lastName: message?.senderLastName,
-    last_name: message?.sender_last_name,
-    username: message?.senderUsername || message?.sender_username,
-  });
-
-  return normalizeChatSearchText(parts.join(" "));
-};
-
-const buildSystemMessageSearchSnippet = (parsedMessage) => {
-  if (!parsedMessage) return "";
-
-  switch (parsedMessage.type) {
-    case "application_approved_dm":
-      return [
-        `You approved ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}`,
-        `Your application to ${parsedMessage.teamName} was approved by ${parsedMessage.approverName}`,
-        parsedMessage.hasPersonalMessage ? "who added this message" : "Welcome to the team",
-      ].join(". ");
-    case "application_approved":
-      return [
-        `Your application was approved by ${parsedMessage.approverName}. Welcome to the team`,
-        `${parsedMessage.applicantName} has applied successfully and was added by ${parsedMessage.approverName}. Say hello to them`,
-      ].join(". ");
-    case "application_declined":
-      return [
-        `You declined ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}`,
-        `Your application to ${parsedMessage.teamName} was declined by ${parsedMessage.approverName}`,
-        parsedMessage.hasPersonalMessage
-          ? "who added this message"
-          : "Want to reach out to them in this chat",
-      ].join(". ");
-    case "application_response":
-      return `Response to your application for ${parsedMessage.teamName}. Your decline response to ${parsedMessage.applicantName}'s application for ${parsedMessage.teamName}. ${parsedMessage.personalMessage || ""}`;
-    case "invitation_declined":
-      return [
-        `You declined ${parsedMessage.inviterName}'s invitation for ${parsedMessage.teamName}`,
-        `Your invitation for ${parsedMessage.teamName} was declined by ${parsedMessage.inviteeName}`,
-        parsedMessage.hasPersonalMessage
-          ? "who added this message"
-          : "Want to reach out to them in this chat",
-      ].join(". ");
-    case "invitation_response":
-      return `Response to your invitation for ${parsedMessage.teamName}. ${parsedMessage.personalMessage || ""}`;
-    case "team_join":
-      return `${parsedMessage.userName} joined the team. You joined the team. Welcome aboard. ${parsedMessage.personalMessage || ""}`;
-    case "team_leave":
-      return `${parsedMessage.userName} has left the team. You have left the team.`;
-    case "role_application_approved":
-      return `${parsedMessage.applicantName}'s application for ${parsedMessage.roleName} was approved.`;
-    case "role_reopened":
-      return `${parsedMessage.userName} has left the role ${parsedMessage.roleName}. The role is open again to be filled.`;
-    case "role_filled":
-      return parsedMessage.userName && parsedMessage.userName !== "Someone"
-        ? `${parsedMessage.userName} is now filling the role ${parsedMessage.roleName}.`
-        : `The role ${parsedMessage.roleName} was marked as filled.`;
-    case "member_removed_public":
-      return `${parsedMessage.userName} has been removed from the team. You removed ${parsedMessage.userName} from the team.`;
-    case "invitation_cancelled":
-      return `${parsedMessage.cancellerName} cancelled your invitation to join ${parsedMessage.teamName}. You cancelled your invitation for ${parsedMessage.inviteeName} to join ${parsedMessage.teamName}.`;
-    case "application_cancelled":
-      return `${parsedMessage.applicantName} cancelled their application for ${parsedMessage.teamName}. You cancelled your application for ${parsedMessage.teamName}.`;
-    case "member_removed":
-      return `You were removed from ${parsedMessage.teamName} by ${parsedMessage.removerName}. You removed ${parsedMessage.memberName} from ${parsedMessage.teamName}.`;
-    case "role_changed":
-      return `Your role in ${parsedMessage.teamName} was changed to ${parsedMessage.newRole} by ${parsedMessage.changerName}. You changed ${parsedMessage.memberName}'s role to ${parsedMessage.newRole} in ${parsedMessage.teamName}.`;
-    case "ownership_team":
-      return `${parsedMessage.prevOwnerName} transferred ownership to ${parsedMessage.newOwnerName}`;
-    case "ownership_transferred":
-      return `${parsedMessage.prevOwnerName} transferred ownership of ${parsedMessage.teamName} to you. You transferred team ownership of ${parsedMessage.teamName} to ${parsedMessage.newOwnerName}. Congratulations`;
-    case "team_deleted":
-      return `${parsedMessage.ownerName} deleted the team ${parsedMessage.teamName}. You deleted the team ${parsedMessage.teamName}.`;
-    default:
-      return "";
-  }
-};
-
-const buildMessageSearchSnippet = (message) => {
-  const parsedSystemMessage = parseSystemMessage(message?.content);
-  const systemMessageText = buildSystemMessageSearchSnippet(parsedSystemMessage);
-  const senderName = [
-    message?.senderFirstName || message?.sender_first_name,
-    message?.senderLastName || message?.sender_last_name,
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  const sender =
-    senderName ||
-    message?.senderUsername ||
-    message?.sender_username ||
-    message?.sender?.username ||
-    "";
-  const body =
-    systemMessageText ||
-    message?.content ||
-    message?.fileName ||
-    message?.file_name ||
-    (message?.imageUrl || message?.image_url ? "Image" : "") ||
-    (message?.fileUrl || message?.file_url ? "File" : "");
-
-  return [sender, body].filter(Boolean).join(": ");
-};
-
-const getMessageSearchId = (message) =>
-  message?.id || message?.messageId || message?.message_id || null;
-
-const NOTIFICATION_EVENT_MESSAGE_MARKERS = {
-  application_approved: ["APPLICATION_APPROVED"],
-  application_rejected: ["APPLICATION_DECLINED"],
-  application_cancelled: ["APPLICATION_CANCELLED"],
-  role_application_cancelled: ["APPLICATION_CANCELLED"],
-  invitation_declined: ["INVITATION_DECLINED"],
-  invitation_cancelled: ["INVITATION_CANCELLED"],
-  member_left: ["MEMBER_LEFT", "MEMBER_REMOVED_PUBLIC"],
-  member_removed: ["MEMBER_REMOVED"],
-  ownership_transferred: ["OWNERSHIP_TRANSFERRED"],
-  role_changed: ["ROLE_CHANGED"],
-  role_created: ["ROLE_CREATED"],
-  role_updated: ["ROLE_UPDATED"],
-  role_deleted: ["ROLE_DELETED"],
-  role_closed: ["ROLE_CLOSED"],
-  role_filled: [
-    "ROLE_FILLED",
-    "ROLE_APPLICATION_FILLED",
-    "ROLE_INVITATION_FILLED",
-  ],
-  role_application_deferred_invite: ["ROLE_APPLICATION_DEFERRED_INVITE"],
-  role_reopened: ["ROLE_REOPENED"],
-  role_reopened_admin: ["ROLE_REOPENED_ADMIN"],
-  team_deleted: ["TEAM_DELETED"],
-};
-
-const getNotificationEventHighlightIds = (messages, eventTarget) => {
-  const type = String(eventTarget?.type || "").toLowerCase();
-  if (!type) return [];
-
-  const markers = NOTIFICATION_EVENT_MESSAGE_MARKERS[type] || [];
-  const referenceId = eventTarget.referenceId
-    ? String(eventTarget.referenceId)
-    : "";
-  const actorId = eventTarget.actorId ? String(eventTarget.actorId) : "";
-  const matchingMessages = (messages || []).filter((message) => {
-    const content = String(message?.content || "");
-    const normalizedContent = content.toUpperCase();
-    const markerMatches =
-      markers.length === 0 ||
-      markers.some((marker) => normalizedContent.includes(marker));
-
-    if (!markerMatches) return false;
-
-    const referenceMatches =
-      !referenceId ||
-      content.includes(`| ${referenceId}:`) ||
-      content.includes(`:${referenceId}:`) ||
-      String(message?.id) === referenceId;
-    const actorMatches =
-      !actorId ||
-      String(message?.senderId ?? message?.sender_id ?? "") === actorId ||
-      content.includes(`${actorId}:`);
-
-    return referenceMatches && actorMatches;
-  });
-
-  const target = matchingMessages[matchingMessages.length - 1];
-  return target?.id ? [target.id] : [];
-};
-
-const buildConversationLastMessagePreview = (message) => {
-  if (message?.content) return message.content;
-
-  const fileName = message?.fileName || message?.file_name;
-  const fileUrl = message?.fileUrl || message?.file_url;
-  const imageUrl = message?.imageUrl || message?.image_url;
-
-  if (imageUrl) {
-    return fileName ? `Image "${fileName}" sent` : "Image sent";
-  }
-
-  if (fileName || fileUrl) {
-    const ext = fileName?.split(".").pop()?.toLowerCase();
-    const label = ["xls", "xlsx", "csv"].includes(ext) ? "Spreadsheet" : "File";
-    return `${label} "${fileName || "attachment"}" sent`;
-  }
-
-  return message?.content ?? "";
-};
-
-const hasConversationPreview = (conversation) => {
-  const lastMessage = conversation?.lastMessage ?? conversation?.last_message;
-
-  if (typeof lastMessage === "string") {
-    return lastMessage.trim().length > 0;
-  }
-
-  if (lastMessage && typeof lastMessage === "object") {
-    return Boolean(
-      lastMessage.content ||
-        lastMessage.fileName ||
-        lastMessage.file_name ||
-        lastMessage.fileUrl ||
-        lastMessage.file_url ||
-        lastMessage.imageUrl ||
-        lastMessage.image_url,
-    );
-  }
-
-  return Boolean(
-    conversation?.lastMessageFileName ||
-      conversation?.last_message_file_name ||
-      conversation?.lastMessageFileUrl ||
-      conversation?.last_message_file_url ||
-      conversation?.lastMessageImageUrl ||
-      conversation?.last_message_image_url,
-  );
-};
-
-// Fill in last-message previews for conversations the list endpoint returned
-// without one, by fetching the latest message per conversation. Pure: returns a
-// new list with previews merged in (or the input unchanged when nothing needs
-// hydrating), so it can run inside the conversations queryFn.
-const hydrateConversationPreviews = async (conversationList) => {
-  const conversationsToHydrate = (conversationList || []).filter(
-    (conversation) =>
-      !conversation.isVirtual && !hasConversationPreview(conversation),
-  );
-
-  if (conversationsToHydrate.length === 0) return conversationList || [];
-
-  const hydratedPreviews = await Promise.allSettled(
-    conversationsToHydrate.map(async (conversation) => {
-      const type = conversation.type || "direct";
-      const response = await messageService.getMessages(conversation.id, type, {
-        limit: 1,
-      });
-      const latestMessage = response?.data?.[response.data.length - 1];
-      const preview = buildConversationLastMessagePreview(latestMessage);
-
-      if (!latestMessage || !preview) return null;
-
-      return {
-        id: conversation.id,
-        type,
-        preview,
-        updatedAt:
-          latestMessage.createdAt ||
-          latestMessage.created_at ||
-          conversation.updatedAt,
-      };
-    }),
-  );
-
-  const previewByKey = new Map();
-
-  hydratedPreviews.forEach((result) => {
-    if (result.status !== "fulfilled" || !result.value) return;
-    previewByKey.set(
-      `${result.value.type}:${String(result.value.id)}`,
-      result.value,
-    );
-  });
-
-  if (previewByKey.size === 0) return conversationList || [];
-
-  return (conversationList || []).map((conversation) => {
-    const type = conversation.type || "direct";
-    const hydratedPreview = previewByKey.get(
-      `${type}:${String(conversation.id)}`,
-    );
-
-    if (!hydratedPreview || hasConversationPreview(conversation)) {
-      return conversation;
-    }
-
-    return {
-      ...conversation,
-      lastMessage: hydratedPreview.preview,
-      updatedAt: hydratedPreview.updatedAt || conversation.updatedAt,
-    };
-  });
-};
-
-const getMessageSearchTimestamp = (message) => {
-  const timestamp =
-    message?.createdAt ||
-    message?.created_at ||
-    message?.sentAt ||
-    message?.sent_at ||
-    message?.updatedAt ||
-    message?.updated_at;
-  const parsedDate = normalizeTimestampToDate(timestamp);
-
-  return parsedDate?.getTime() ?? 0;
-};
-
-const getMessageSearchTimestampValue = (message) =>
-  message?.createdAt ||
-  message?.created_at ||
-  message?.sentAt ||
-  message?.sent_at ||
-  message?.updatedAt ||
-  message?.updated_at ||
-  null;
-
-const buildMessageSearchSnippets = (messages) =>
-  (messages || [])
-    .map((message, index) => ({
-      message,
-      index,
-      timestamp: getMessageSearchTimestamp(message),
-    }))
-    .sort((a, b) => a.timestamp - b.timestamp || a.index - b.index)
-    .map(({ message }) => ({
-      id: getMessageSearchId(message),
-      text: buildMessageSearchSnippet(message),
-      // Raw content is kept alongside the humanised search text so the
-      // conversation list can render a matched system/event message with its
-      // canonical icon + colour styling (via getEventPreview), not just plain text.
-      content: message?.content ?? "",
-      timestamp: getMessageSearchTimestampValue(message),
-    }))
-    .filter((snippet) => snippet.text);
-
-const buildLatestMatchPreview = (snippet, normalizedQuery) => {
-  const text = String(snippet || "").trim();
-  if (!text || !normalizedQuery) return text;
-
-  const normalizedText = normalizeChatSearchText(text);
-  const matchIndex = normalizedText.indexOf(normalizedQuery);
-  if (matchIndex === -1 || text.length <= 120) return text;
-
-  const contextBefore = 36;
-  const contextAfter = 72;
-  const start = Math.max(0, matchIndex - contextBefore);
-  const end = Math.min(
-    text.length,
-    matchIndex + normalizedQuery.length + contextAfter,
-  );
-  const prefix = start > 0 ? "..." : "";
-  const suffix = end < text.length ? "..." : "";
-
-  return `${prefix}${text.slice(start, end).trim()}${suffix}`;
-};
-
-const buildMessagesSearchText = (messages) =>
-  normalizeChatSearchText((messages || []).map(buildMessageSearchText).join(" "));
-
-const buildConversationSearchText = (conversation) => {
-  const parts = [];
-  const isTeam = conversation?.type === "team";
-
-  addSearchPart(parts, [
-    conversation?.type,
-    conversation?.lastMessage,
-    conversation?.last_message,
-    conversation?.lastMessage?.content,
-    conversation?.last_message?.content,
-  ]);
-
-  if (isTeam) {
-    const team = conversation?.team || {};
-    addSearchPart(parts, [
-      "team",
-      "team chat",
-      team.name,
-      team.teamName,
-      team.team_name,
-      team.description,
-    ]);
-
-    (team.members || conversation?.members || []).forEach((member) => {
-      addUserSearchParts(parts, member?.user || member);
-      addSearchPart(parts, [member?.role, member?.roleName, member?.role_name]);
-    });
-  } else {
-    addSearchPart(parts, ["direct", "dm", "direct message"]);
-    addUserSearchParts(parts, conversation?.partner || conversation?.partnerUser);
-  }
-
-  return normalizeChatSearchText(parts.join(" "));
-};
+const EMPTY_DIRECT_CONVERSATION_PREVIEW = "Start your conversation...";
+
+const isTransientEmptyDirectConversation = (conversation) =>
+  conversation?.type === "direct" &&
+  conversation?.isVirtual &&
+  (conversation.lastMessage ?? conversation.last_message) ===
+    EMPTY_DIRECT_CONVERSATION_PREVIEW;
 
 const Chat = () => {
   const { conversationId } = useParams();
@@ -792,10 +69,14 @@ const Chat = () => {
       id != null && blockedRelationshipIds?.has?.(String(id)),
     [blockedRelationshipIds],
   );
+  const activeConversationsQueryKey = useMemo(
+    () => getConversationsQueryKey(user?.id),
+    [user?.id],
+  );
   // Conversation list is backed by the React Query cache. The query fetches +
-  // dedupes + hydrates previews once (keyed on a constant, so switching chats
-  // no longer refetches the list); socket/local updates mutate that cache via
-  // the setConversations wrapper below, keeping their (prev) => next shape.
+  // dedupes + hydrates previews once per user (switching chats no longer
+  // refetches the list); socket/local updates mutate that user's cache via the
+  // setConversations wrapper below, keeping their (prev) => next shape.
   const fetchConversations = useCallback(async () => {
     const response = await messageService.getConversations();
     return hydrateConversationPreviews(dedupeConversations(response.data || []));
@@ -804,23 +85,21 @@ const Chat = () => {
     data: conversations = EMPTY_CONVERSATIONS,
     isLoading: loading,
     isError: conversationsLoadError,
-  } = useConversations(fetchConversations, isAuthenticated);
+  } = useConversations(fetchConversations, isAuthenticated, user?.id);
   const setConversations = useCallback(
     (next) =>
       queryClient.setQueryData(
-        conversationsQueryKey,
+        activeConversationsQueryKey,
         (prev = EMPTY_CONVERSATIONS) =>
           typeof next === "function" ? next(prev) : next,
       ),
-    [queryClient],
+    [activeConversationsQueryKey, queryClient],
   );
   const [activeConversation, setActiveConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [replyingTo, setReplyingTo] = useState(null);
   const [error, setError] = useState(null);
   const [onlineUsers, setOnlineUsers] = useState([]);
-  const [typingUsers, setTypingUsers] = useState({});
-  const [users, setUsers] = useState({});
   const [highlightMessageIds, setHighlightMessageIds] = useState([]);
   const [isTeamArchived, setIsTeamArchived] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
@@ -838,84 +117,54 @@ const Chat = () => {
     useState(false);
   const [isActiveConversationVisible, setIsActiveConversationVisible] =
     useState(true);
-  const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [chatMessageSearchIndex, setChatMessageSearchIndex] = useState({});
-  const [chatMessageSearchSnippets, setChatMessageSearchSnippets] = useState({});
-  const [searchingChatMessages, setSearchingChatMessages] = useState(false);
-  const [searchNoResultsToastQuery, setSearchNoResultsToastQuery] = useState(null);
-  const searchNoResultsQueryRef = useRef(null);
-  const [searchChatVisible, setSearchChatVisible] = useState(false);
-  const typingTimeoutRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const pendingScrollAdjustmentRef = useRef(null);
   const conversationsRef = useRef([]);
   const activeConversationRef = useRef(null);
   const messagesRef = useRef([]);
-  const chatSearchLoadingKeysRef = useRef(new Set());
   const pendingChatSearchTargetRef = useRef(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
-
-  // ---- Message de-duplication (focus: ownership/system duplicates) ----
-  const toMinuteBucket = (isoOrDate) => {
-    try {
-      const d = isoOrDate ? normalizeTimestampToDate(isoOrDate) : null;
-      if (!d || Number.isNaN(d.getTime())) return "";
-      return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
-    } catch {
-      return "";
-    }
-  };
-
-  const buildMessageDedupeKey = (msg) => {
-    const content = (msg?.content || "").trim();
-    const minute = toMinuteBucket(msg?.createdAt);
-    const senderId = msg?.senderId ?? "";
-
-    // OWNERSHIP_TEAM (legacy emoji optional)
-    let m = content.match(/^(?:👑\s*)?OWNERSHIP_TEAM:\s*(.+?)\s*\|\s*(.+)\s*$/);
-    if (m) return `ownership_team|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // OWNERSHIP_TRANSFERRED (legacy emoji optional)
-    m = content.match(
-      /^(?:👑\s*)?OWNERSHIP_TRANSFERRED:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+)\s*$/,
-    );
-    if (m)
-      return `ownership_transferred|${m[1].trim()}|${m[2].trim()}|${m[3].trim()}|${minute}`;
-
-    // Plain team chat sentence variant
-    m = content.match(
-      /^(.+?)\s+transferred\s+(?:team\s+)?ownership\s+to\s+(.+?)\.?$/i,
-    );
-    if (m)
-      return `ownership_team_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // Plain DM sentence variant
-    m = content.match(
-      /^(.+?)\s+transferred\s+ownership\s+of\s+"(.+?)"\s+to\s+you\.\s*Congratulations!?\.?$/i,
-    );
-    if (m) return `ownership_dm_plain|${m[1].trim()}|${m[2].trim()}|${minute}`;
-
-    // Fallback: exact duplicates per minute
-    return `generic|${senderId}|${content}|${minute}`;
-  };
-
-  const dedupeMessages = (list) => {
-    const seen = new Set();
-    const out = [];
-    for (const msg of list || []) {
-      const key = buildMessageDedupeKey(msg);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(msg);
-    }
-    return out;
-  };
 
   // Conversation type (used for read-only rendering)
   const conversationType =
     activeConversation?.type ||
     new URLSearchParams(window.location.search).get("type") ||
     "direct";
+  const handleChatSearchQueryChange = useCallback(() => {
+    setHighlightMessageIds([]);
+  }, []);
+  const {
+    activeTypingUsers,
+    clearTypingUsers,
+    handleTyping,
+    handleTypingUpdate,
+  } = useChatTyping({
+    conversationId,
+    currentUser: user,
+    activeConversation,
+  });
+  const {
+    chatSearchEmptyState,
+    chatSearchQuery,
+    filteredConversations,
+    hideChatDuringSearch,
+    isChatSearchActive,
+    isNoSearchResults,
+    normalizedChatSearchQuery,
+    revealSearchChat,
+    searchingChatMessages,
+    searchNoResultsToastQuery,
+    setChatSearchQuery,
+    setSearchNoResultsToastQuery,
+    totalSearchMatches,
+  } = useChatSearchState({
+    conversationId,
+    conversationType,
+    conversations,
+    isAuthenticated,
+    messages,
+    onSearchQueryChange: handleChatSearchQueryChange,
+  });
 
   const conversationPartner =
     conversationType === "direct"
@@ -977,157 +226,59 @@ const Chat = () => {
   const canSendInActiveConversation =
     Boolean(activeConversation) && isCurrentUserActiveTeamMember;
 
-  const fetchTeamDetails = useCallback(
-    (teamId, { force = false } = {}) => {
-      if (!teamId) return Promise.resolve(null);
-      // React Query handles caching and in-flight request dedup that this
-      // component used to track by hand (see fetchTeamById).
-      return fetchTeamById(queryClient, teamId, { force });
-    },
-    [queryClient],
-  );
+  const {
+    revokeTeamChatAccess,
+    refreshActiveTeamMembership,
+    hydrateTeamConversationDetails,
+  } = useChatTeamAccess({
+    queryClient,
+    user,
+    conversationId,
+    conversationType,
+    activeConversation,
+    searchParams,
+    navigate,
+    activeConversationRef,
+    clearTypingUsers,
+    setError,
+    setConversations,
+    setActiveConversation,
+    setMessages,
+    setReplyingTo,
+    setHighlightMessageIds,
+    setHasMoreMessages,
+    setShowChatView,
+    setIsTeamArchived,
+    setLoadingMessages,
+  });
 
-  const revokeTeamChatAccess = useCallback(
-    (teamId, message = "You no longer have access to this team chat.") => {
-      if (!teamId) return;
-
-      socketService.leaveConversation(teamId, "team");
-      setError(message);
-      setConversations((prev) =>
-        prev.filter(
-          (conversation) =>
-            !(
-              conversation.type === "team" &&
-              String(conversation.id) === String(teamId)
-            ),
-        ),
-      );
-
-      const activeTeamId =
-        activeConversationRef.current?.team?.id ?? activeConversationRef.current?.id;
-
-      if (
-        String(activeTeamId) === String(teamId) ||
-        (String(conversationId) === String(teamId) &&
-          (searchParams.get("type") || "direct") === "team")
-      ) {
-        setActiveConversation(null);
-        setMessages([]);
-        setTypingUsers({});
-        setReplyingTo(null);
-        setHighlightMessageIds([]);
-        setHasMoreMessages(false);
-        setShowChatView(false);
-        navigate("/chat", { replace: true });
-      }
-    },
-    [conversationId, navigate, searchParams, setConversations],
-  );
-
-  const refreshActiveTeamMembership = useCallback(
-    async (teamId) => {
-      if (!teamId || !user?.id) return true;
-
-      let teamPayload = null;
-
-      try {
-        const conversationResponse = await messageService.getConversationById(
-          teamId,
-          "team",
-        );
-        teamPayload = conversationResponse?.data?.team || null;
-      } catch (conversationError) {
-        if (
-          conversationError.response?.status === 404 ||
-          conversationError.response?.status === 403
-        ) {
-          revokeTeamChatAccess(teamId);
-          return false;
-        }
-
-        throw conversationError;
-      }
-
-      if (!Array.isArray(teamPayload?.members)) {
-        try {
-          teamPayload = await fetchTeamDetails(teamId, { force: true });
-        } catch (teamError) {
-          if (teamError.response?.status === 404 && isArchivedTeamData(teamPayload)) {
-            return true;
-          }
-
-          throw teamError;
-        }
-      }
-
-      if (!isUserTeamMember(teamPayload.members, user.id)) {
-        revokeTeamChatAccess(teamId);
-        return false;
-      }
-
-      setActiveConversation((prev) => {
-        if (
-          !prev ||
-          prev.type !== "team" ||
-          String(prev.team?.id ?? prev.id) !== String(teamId)
-        ) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          team: mergeTeamDetailsIntoConversationData(prev, teamPayload).team,
-        };
-      });
-
-      return true;
-    },
-    [fetchTeamDetails, revokeTeamChatAccess, user?.id],
-  );
-
-  const hydrateTeamConversationDetails = useCallback(
-    async (conversationDetails, teamId) => {
-      if (!conversationDetails?.data || !teamId) return false;
-
-      if (isArchivedTeamData(conversationDetails.data.team)) {
-        setIsTeamArchived(true);
-
-        if (Array.isArray(conversationDetails.data.team?.members)) {
-          if (!isUserTeamMember(conversationDetails.data.team.members, user?.id)) {
-            revokeTeamChatAccess(teamId);
-            setLoadingMessages(false);
-            return true;
-          }
-        }
-
-        return false;
-      }
-
-      try {
-        const teamPayload = await fetchTeamDetails(teamId);
-
-        setIsTeamArchived(isArchivedTeamData(teamPayload));
-
-        if (Array.isArray(teamPayload?.members)) {
-          if (!isUserTeamMember(teamPayload.members, user?.id)) {
-            revokeTeamChatAccess(teamId);
-            setLoadingMessages(false);
-            return true;
-          }
-
-          conversationDetails.data = mergeTeamDetailsIntoConversationData(
-            conversationDetails.data,
-            teamPayload,
-          );
-        }
-      } catch (teamError) {
-        console.error("Error fetching team member details:", teamError);
-      }
-
-      return false;
-    },
-    [fetchTeamDetails, revokeTeamChatAccess, user?.id],
-  );
+  const { loadEarlierMessages } = useActiveChatConversation({
+    conversationId,
+    conversationsRef,
+    dedupeMessages,
+    hasMoreMessages,
+    hydrateTeamConversationDetails,
+    isAuthenticated,
+    loadingMore,
+    messages,
+    messagesContainerRef,
+    navigate,
+    pendingChatSearchTargetRef,
+    pendingScrollAdjustmentRef,
+    revokeTeamChatAccess,
+    searchParams,
+    setActiveConversation,
+    setConversations,
+    setError,
+    setHasMoreMessages,
+    setHighlightMessageIds,
+    setIsTeamArchived,
+    setLoadingMessages,
+    setLoadingMore,
+    setMessages,
+    setSearchParams,
+    user,
+  });
 
   const mentionParticipants = useMemo(() => {
     if (conversationType === "direct") {
@@ -1157,11 +308,6 @@ const Chat = () => {
     !isActiveConversationVisible;
   const showEmptyConversationState =
     !loading && conversations.length === 0 && !conversationId;
-  const normalizedChatSearchQuery = useMemo(
-    () => normalizeChatSearchText(chatSearchQuery.trim()),
-    [chatSearchQuery],
-  );
-  const isChatSearchActive = normalizedChatSearchQuery.length > 0;
 
   useEffect(() => {
     setReplyingTo(null);
@@ -1172,268 +318,24 @@ const Chat = () => {
   }, [conversations]);
 
   useEffect(() => {
+    setConversations((prev) => {
+      const next = prev.filter(
+        (conversation) =>
+          !isTransientEmptyDirectConversation(conversation) ||
+          String(conversation.id) === String(conversationId),
+      );
+
+      return next.length === prev.length ? prev : next;
+    });
+  }, [conversationId, setConversations]);
+
+  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
-
-  useEffect(() => {
-    if (
-      conversationType !== "team" ||
-      !activeConversation?.team?.id ||
-      !user?.id
-    ) {
-      return undefined;
-    }
-
-    const teamId = activeConversation.team.id;
-    let cancelled = false;
-
-    const checkMembership = async () => {
-      try {
-        if (!cancelled) {
-          await refreshActiveTeamMembership(teamId);
-        }
-      } catch (err) {
-        console.error("Error checking active team chat access:", err);
-      }
-    };
-
-    checkMembership();
-    const intervalId = window.setInterval(checkMembership, 10000);
-
-    const handleFocus = () => {
-      checkMembership();
-    };
-
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [
-    activeConversation?.team?.id,
-    conversationType,
-    refreshActiveTeamMembership,
-    user?.id,
-  ]);
-
-  const fetchConversationSearchText = useCallback(async (conversation) => {
-    const conversationType = conversation?.type || "direct";
-    const allMessages = [];
-    let before;
-    let hasMore = true;
-
-    while (
-      hasMore &&
-      allMessages.length < CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION
-    ) {
-      const remaining =
-        CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION - allMessages.length;
-      const response = await messageService.getMessages(
-        conversation.id,
-        conversationType,
-        {
-          before,
-          limit: Math.min(CHAT_SEARCH_PAGE_SIZE, remaining),
-        },
-      );
-      const pageMessages = Array.isArray(response?.data) ? response.data : [];
-
-      if (pageMessages.length === 0) {
-        break;
-      }
-
-      allMessages.push(...pageMessages);
-      hasMore = Boolean(response?.hasMore);
-      before = pageMessages[0]?.id;
-
-      if (!before) {
-        break;
-      }
-    }
-
-    return {
-      text: buildMessagesSearchText(allMessages),
-      snippets: buildMessageSearchSnippets(allMessages),
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!conversationId || messages.length === 0) return;
-
-    const key = `${conversationType}:${conversationId}`;
-    const activeMessagesSearchText = buildMessagesSearchText(messages);
-
-    setChatMessageSearchIndex((prev) => ({
-      ...prev,
-      [key]: normalizeChatSearchText(
-        `${prev[key] || ""} ${activeMessagesSearchText}`,
-      ),
-    }));
-    setChatMessageSearchSnippets((prev) => ({
-      ...prev,
-      [key]: buildMessageSearchSnippets(messages),
-    }));
-  }, [conversationId, conversationType, messages]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !isChatSearchActive || conversations.length === 0) {
-      setSearchingChatMessages(false);
-      return;
-    }
-
-    const missingConversations = conversations.filter((conversation) => {
-      const key = getConversationSearchKey(conversation);
-      return (
-        !chatMessageSearchIndex[key] &&
-        !chatSearchLoadingKeysRef.current.has(key)
-      );
-    });
-
-    if (missingConversations.length === 0) {
-      setSearchingChatMessages(chatSearchLoadingKeysRef.current.size > 0);
-      return;
-    }
-
-    missingConversations.forEach((conversation) => {
-      chatSearchLoadingKeysRef.current.add(getConversationSearchKey(conversation));
-    });
-    setSearchingChatMessages(true);
-
-    Promise.allSettled(
-      missingConversations.map(async (conversation) => ({
-        key: getConversationSearchKey(conversation),
-        result: await fetchConversationSearchText(conversation),
-      })),
-    ).then((results) => {
-      setChatMessageSearchIndex((prev) => {
-        const next = { ...prev };
-
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            next[result.value.key] = result.value.result.text || " ";
-            return;
-          }
-
-          next[getConversationSearchKey(missingConversations[index])] = " ";
-        });
-
-        return next;
-      });
-      setChatMessageSearchSnippets((prev) => {
-        const next = { ...prev };
-
-        results.forEach((result, index) => {
-          if (result.status === "fulfilled") {
-            next[result.value.key] = result.value.result.snippets || [];
-            return;
-          }
-
-          next[getConversationSearchKey(missingConversations[index])] = [];
-        });
-
-        return next;
-      });
-
-      results.forEach((result, index) => {
-        const key =
-          result.status === "fulfilled"
-            ? result.value.key
-            : getConversationSearchKey(missingConversations[index]);
-        chatSearchLoadingKeysRef.current.delete(key);
-      });
-      setSearchingChatMessages(chatSearchLoadingKeysRef.current.size > 0);
-    });
-  }, [
-    chatMessageSearchIndex,
-    conversations,
-    fetchConversationSearchText,
-    isAuthenticated,
-    isChatSearchActive,
-  ]);
-
-  const filteredConversations = useMemo(() => {
-    if (!isChatSearchActive) return conversations;
-
-    return conversations
-      .map((conversation) => {
-        const key = getConversationSearchKey(conversation);
-        const conversationSearchText = buildConversationSearchText(conversation);
-        const messageSearchText = chatMessageSearchIndex[key] || "";
-        const searchMatchCount =
-          countChatSearchMatches(
-            conversationSearchText,
-            normalizedChatSearchQuery,
-          ) +
-          countChatSearchMatches(messageSearchText, normalizedChatSearchQuery);
-        const matchedMessageSnippet = [
-          ...(chatMessageSearchSnippets[key] || []),
-        ]
-          .reverse()
-          .find((snippet) =>
-            normalizeChatSearchText(snippet.text).includes(
-              normalizedChatSearchQuery,
-            ),
-          );
-        const nextConversation = matchedMessageSnippet
-          ? {
-              ...conversation,
-              searchMatchPreview: buildLatestMatchPreview(
-                matchedMessageSnippet.text,
-                normalizedChatSearchQuery,
-              ),
-              searchMatchContent: matchedMessageSnippet.content,
-              searchMatchMessageId: matchedMessageSnippet.id,
-              searchMatchCreatedAt: matchedMessageSnippet.timestamp,
-            }
-          : conversation;
-
-        return {
-          conversation: nextConversation,
-          searchMatchCount,
-        };
-      })
-      .filter(({ searchMatchCount }) => searchMatchCount > 0)
-      .sort((a, b) => {
-        if (b.searchMatchCount !== a.searchMatchCount) {
-          return b.searchMatchCount - a.searchMatchCount;
-        }
-
-        const aDate = getConversationUpdatedAt(a.conversation)?.getTime() ?? 0;
-        const bDate = getConversationUpdatedAt(b.conversation)?.getTime() ?? 0;
-        return bDate - aDate;
-      })
-      .map(({ conversation, searchMatchCount }) => ({ ...conversation, searchMatchCount }));
-  }, [
-    chatMessageSearchIndex,
-    chatMessageSearchSnippets,
-    conversations,
-    isChatSearchActive,
-    normalizedChatSearchQuery,
-  ]);
-
-  useEffect(() => {
-    if (isChatSearchActive && !searchingChatMessages && filteredConversations.length === 0) {
-      const query = chatSearchQuery.trim();
-      if (searchNoResultsQueryRef.current !== query) {
-        searchNoResultsQueryRef.current = query;
-        setSearchNoResultsToastQuery(query);
-      }
-    } else {
-      searchNoResultsQueryRef.current = null;
-      setSearchNoResultsToastQuery(null);
-    }
-  }, [isChatSearchActive, searchingChatMessages, filteredConversations.length, chatSearchQuery]);
-
-  useEffect(() => {
-    setSearchChatVisible(false);
-    setHighlightMessageIds([]);
-  }, [chatSearchQuery]);
 
   useEffect(() => {
     setIsActiveConversationVisible(true);
@@ -1486,7 +388,7 @@ const Chat = () => {
       setError("This conversation is no longer available.");
       setActiveConversation(null);
       setMessages([]);
-      setTypingUsers({});
+      clearTypingUsers();
       setHighlightMessageIds([]);
       setHasMoreMessages(false);
       navigate("/chat", { replace: true });
@@ -1496,7 +398,13 @@ const Chat = () => {
     // re-run — and refetch the whole conversation list — on every chat switch.
     // This effect must only react to block/unblock state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockedRelationshipIds, isAuthenticated, isBlockedId, refreshConversationList]);
+  }, [
+    blockedRelationshipIds,
+    clearTypingUsers,
+    isAuthenticated,
+    isBlockedId,
+    refreshConversationList,
+  ]);
 
   // Surface a load failure from the conversations query (matches the old
   // fetch-effect error message).
@@ -1516,9 +424,14 @@ const Chat = () => {
     if (!isAuthenticated || loading) return;
 
     if (!conversationId) {
-      if (conversations.length > 0) {
-        const firstConversationType = conversations[0].type || "direct";
-        navigate(`/chat/${conversations[0].id}?type=${firstConversationType}`);
+      const persistentConversations = conversations.filter(
+        (conversation) => !isTransientEmptyDirectConversation(conversation),
+      );
+
+      if (persistentConversations.length > 0) {
+        const firstConversation = persistentConversations[0];
+        const firstConversationType = firstConversation.type || "direct";
+        navigate(`/chat/${firstConversation.id}?type=${firstConversationType}`);
       }
       return;
     }
@@ -1558,7 +471,7 @@ const Chat = () => {
             is_synthetic:
               userData.is_synthetic ?? userData.isSynthetic ?? undefined,
           },
-          lastMessage: "Start your conversation...",
+          lastMessage: EMPTY_DIRECT_CONVERSATION_PREVIEW,
           updatedAt: new Date().toISOString(),
           isVirtual: true,
           unreadCount: 0,
@@ -1582,963 +495,29 @@ const Chat = () => {
     setConversations,
   ]);
 
-  // Fetch messages when conversation changes
-  useEffect(() => {
-    const fetchMessages = async () => {
-      if (!conversationId) return;
-
-      try {
-        setLoadingMessages(true);
-        setLoadingMore(false);
-        setHasMoreMessages(false);
-
-        // ✅ Reset archived state when switching conversations
-        setIsTeamArchived(false);
-
-        const urlParams = new URLSearchParams(window.location.search);
-        const type = urlParams.get("type") || "direct";
-        const highlightedMessageId =
-          urlParams.get("highlightMessage") || urlParams.get("messageId");
-        const highlightedEventTarget = {
-          type:
-            urlParams.get("highlightEvent") ||
-            urlParams.get("highlightEventType") ||
-            "",
-          referenceId:
-            urlParams.get("highlightRef") ||
-            urlParams.get("highlightReferenceId") ||
-            "",
-          actorId: urlParams.get("highlightActor") || "",
-        };
-
-        let conversationDetails;
-        try {
-          conversationDetails = await messageService.getConversationById(
-            conversationId,
-            type,
-          );
-
-          if (type === "team" && conversationDetails?.data) {
-            setIsTeamArchived(isArchivedTeamData(conversationDetails.data.team));
-
-            const accessRevoked = await hydrateTeamConversationDetails(
-              conversationDetails,
-              conversationId,
-            );
-            if (accessRevoked) return;
-          }
-
-          setActiveConversation(conversationDetails.data);
-
-          // Ensure team conversation appears in conversation list
-          if (type === "team" && conversationDetails.data) {
-            setConversations((prev) => {
-              const existingConversation = prev.find(
-                (conv) =>
-                  String(conv.id) === String(conversationId) &&
-                  conv.type === "team",
-              );
-
-              if (!existingConversation) {
-                const newTeamConversation = {
-                  id: parseInt(conversationId),
-                  type: "team",
-                  team: {
-                    id: conversationDetails.data.team.id,
-                    name: conversationDetails.data.team.name,
-                    avatarUrl: conversationDetails.data.team.avatarUrl,
-                    isSynthetic:
-                      conversationDetails.data.team.isSynthetic ??
-                      conversationDetails.data.team.is_synthetic ??
-                      undefined,
-                    is_synthetic:
-                      conversationDetails.data.team.is_synthetic ??
-                      conversationDetails.data.team.isSynthetic ??
-                      undefined,
-                    archived_at: conversationDetails.data.team.archived_at,
-                    archivedAt:
-                      conversationDetails.data.team.archivedAt ??
-                      conversationDetails.data.team.archived_at,
-                    status: conversationDetails.data.team.status,
-                  },
-                  lastMessage: "Start your team conversation...",
-                  updatedAt: new Date().toISOString(),
-                  isVirtual: true,
-                  unreadCount: 0,
-                };
-
-                return [newTeamConversation, ...prev];
-              }
-
-              return prev;
-            });
-          }
-        } catch (error) {
-          // Check if it's an access denied error (user was removed from team)
-          if (error.response?.status === 403) {
-            setError("You no longer have access to this conversation.");
-            setLoadingMessages(false);
-            // Navigate back to chat list or my teams
-            navigate("/chat");
-            return;
-          }
-
-          if (type === "team" && conversationDetails?.data) {
-            const accessRevoked = await hydrateTeamConversationDetails(
-              conversationDetails,
-              conversationId,
-            );
-            if (accessRevoked) return;
-          }
-
-          if (type === "direct") {
-            // No messages exist yet — this is a new/virtual conversation.
-            // Build activeConversation from what we already know so the chat
-            // panel opens and the user can type the first message. The
-            // conversation row is created in the backend when they send it.
-            const knownConv = conversationsRef.current.find(
-              (c) =>
-                String(c.id) === String(conversationId) &&
-                c.type === "direct",
-            );
-            if (knownConv?.partner) {
-              setActiveConversation({
-                id: parseInt(conversationId),
-                type: "direct",
-                partner: knownConv.partner,
-                isVirtual: true,
-              });
-            } else {
-              try {
-                // A 404 (no such user — stale link or deleted account) is an
-                // expected, gracefully-handled case, not console noise.
-                const userResponse = await userService.getUserById(
-                  conversationId,
-                  { quietErrorStatuses: [404] },
-                );
-                const userData = userResponse.data;
-                setActiveConversation({
-                  id: parseInt(conversationId),
-                  type: "direct",
-                  partner: {
-                    id: userData.id,
-                    username: userData.username,
-                    firstName: userData.firstName || userData.first_name,
-                    lastName: userData.lastName || userData.last_name,
-                    avatarUrl: userData.avatarUrl || userData.avatar_url,
-                    isSynthetic: userData.isSynthetic ?? userData.is_synthetic ?? undefined,
-                    is_synthetic: userData.is_synthetic ?? userData.isSynthetic ?? undefined,
-                  },
-                  isVirtual: true,
-                });
-              } catch (userError) {
-                if (!isQuietError(userError)) {
-                  console.error(
-                    "Failed to load partner for new conversation:",
-                    userError,
-                  );
-                }
-              }
-            }
-          }
-        }
-
-        // Get messages for the conversation
-        try {
-          const messagesResponse = await messageService.getMessages(
-            conversationId,
-            type,
-          );
-          const searchTarget = highlightedMessageId
-            ? {
-                conversationId,
-                type,
-                messageId: highlightedMessageId,
-                query: null,
-              }
-            : pendingChatSearchTargetRef.current;
-          const shouldRevealSearchTarget =
-            searchTarget?.messageId &&
-            String(searchTarget.conversationId) === String(conversationId) &&
-            searchTarget.type === type;
-          let fetchedMessages = messagesResponse.data || [];
-          let nextHasMoreMessages = messagesResponse.hasMore || false;
-
-          if (shouldRevealSearchTarget) {
-            let oldestMessage = fetchedMessages[0];
-            let loadedCount = fetchedMessages.length;
-
-            while (
-              nextHasMoreMessages &&
-              oldestMessage?.id &&
-              loadedCount < CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION
-            ) {
-              const remaining =
-                CHAT_SEARCH_MAX_MESSAGES_PER_CONVERSATION - loadedCount;
-              const earlierResponse = await messageService.getMessages(
-                conversationId,
-                type,
-                {
-                  before: oldestMessage.id,
-                  limit: Math.min(50, remaining),
-                },
-              );
-              const earlierMessages = earlierResponse.data || [];
-
-              if (earlierMessages.length === 0) {
-                nextHasMoreMessages = false;
-                break;
-              }
-
-              fetchedMessages = [...earlierMessages, ...fetchedMessages];
-              loadedCount += earlierMessages.length;
-              nextHasMoreMessages = earlierResponse.hasMore || false;
-              oldestMessage = earlierMessages[0];
-            }
-          }
-
-          setHasMoreMessages(nextHasMoreMessages);
-          setMessages(dedupeMessages(fetchedMessages));
-
-          const latestFetchedMessage =
-            fetchedMessages[fetchedMessages.length - 1] || null;
-          const latestPreview =
-            buildConversationLastMessagePreview(latestFetchedMessage);
-
-          if (latestFetchedMessage && latestPreview) {
-            setConversations((prev) =>
-              prev.map((conversation) =>
-                String(conversation.id) === String(conversationId)
-                  ? {
-                      ...conversation,
-                      lastMessage: latestPreview,
-                      updatedAt:
-                        latestFetchedMessage.createdAt ||
-                        latestFetchedMessage.created_at ||
-                        conversation.updatedAt,
-                    }
-                  : conversation,
-              ),
-            );
-          }
-
-          // Check if we need to highlight messages from a specific user (from notification)
-          const highlightUser = searchParams.get("highlightUser");
-          const eventHighlightIds = getNotificationEventHighlightIds(
-            fetchedMessages,
-            highlightedEventTarget,
-          );
-
-          if (
-            shouldRevealSearchTarget &&
-            fetchedMessages.some(
-              (msg) => String(msg.id) === String(searchTarget.messageId),
-            )
-          ) {
-            const query = searchTarget.query;
-            const allMatchingIds = query
-              ? fetchedMessages
-                  .filter((msg) => buildMessageSearchText(msg).includes(query))
-                  .map((msg) => msg.id)
-                  .filter(Boolean)
-              : [];
-            // Put the target (most recent match) first so the view scrolls to it
-            const highlightIds = [
-              searchTarget.messageId,
-              ...allMatchingIds.filter(
-                (id) => String(id) !== String(searchTarget.messageId),
-              ),
-            ];
-            setHighlightMessageIds(highlightIds);
-            pendingChatSearchTargetRef.current = null;
-            // No auto-clear — highlights persist until search query changes
-          } else if (eventHighlightIds.length > 0) {
-            if (shouldRevealSearchTarget) {
-              pendingChatSearchTargetRef.current = null;
-            }
-
-            setHighlightMessageIds(eventHighlightIds);
-            setTimeout(() => {
-              setHighlightMessageIds([]);
-            }, 3500);
-          } else if (highlightUser) {
-            if (shouldRevealSearchTarget) {
-              pendingChatSearchTargetRef.current = null;
-            }
-
-            // Highlight the most recent messages from this user (join message + response)
-            const userMessages = fetchedMessages
-              .filter((msg) => String(msg.senderId) === String(highlightUser))
-              .slice(-3) // Get last 3 messages from this user
-              .map((msg) => msg.id);
-
-            if (userMessages.length > 0) {
-              setHighlightMessageIds(userMessages);
-              // Clear highlights after 4 seconds
-              setTimeout(() => {
-                setHighlightMessageIds([]);
-                // Clear the URL parameter
-                setSearchParams((prev) => {
-                  prev.delete("highlightUser");
-                  return prev;
-                });
-              }, 4000);
-            }
-          } else {
-            if (shouldRevealSearchTarget) {
-              pendingChatSearchTargetRef.current = null;
-            }
-
-            // Default behavior: highlight unread messages
-            const unreadIds = fetchedMessages
-              .filter((msg) => msg.senderId !== user?.id && !msg.readAt)
-              .map((msg) => msg.id);
-
-            if (unreadIds.length > 0) {
-              setHighlightMessageIds(unreadIds);
-              // Clear highlights after 3 seconds
-              setTimeout(() => {
-                setHighlightMessageIds([]);
-              }, 3000);
-            }
-          }
-        } catch {
-          setHasMoreMessages(false);
-          setMessages([]);
-        }
-
-        setLoadingMessages(false);
-
-        // Wait for socket to be connected before joining
-        const socket = socketService.getSocket();
-        if (socket && socket.connected) {
-          socketService.joinConversation(conversationId, type);
-          socketService.markMessagesAsRead(conversationId, type);
-        } else {
-          const checkConnection = setInterval(() => {
-            const socket = socketService.getSocket();
-            if (socket && socket.connected) {
-              const urlParams = new URLSearchParams(window.location.search);
-              const type = urlParams.get("type") || "direct";
-              socketService.joinConversation(conversationId, type);
-              socketService.markMessagesAsRead(conversationId, type);
-              clearInterval(checkConnection);
-            }
-          }, 100);
-
-          setTimeout(() => clearInterval(checkConnection), 5000);
-        }
-      } catch (err) {
-        console.error("Error fetching messages:", err);
-        setError("Failed to load messages. Please try again.");
-        setLoadingMessages(false);
-      }
-    };
-
-    if (isAuthenticated && conversationId) {
-      fetchMessages();
-
-      return () => {
-        if (conversationId) {
-          const urlParams = new URLSearchParams(window.location.search);
-          const type = urlParams.get("type") || "direct";
-          socketService.leaveConversation(conversationId, type);
-        }
-      };
-    }
-  }, [
-    isAuthenticated,
+  useChatSocketEvents({
+    activeConversationRef,
+    clearTypingUsers,
     conversationId,
-    hydrateTeamConversationDetails,
-    searchParams,
-    setSearchParams,
-    navigate,
-    user?.id,
-    setConversations,
-  ]);
-
-  useEffect(() => {
-    if (!pendingScrollAdjustmentRef.current) return;
-
-    const container = messagesContainerRef.current;
-
-    if (!container) {
-      pendingScrollAdjustmentRef.current = null;
-      return;
-    }
-
-    const { previousScrollHeight, previousScrollTop } =
-      pendingScrollAdjustmentRef.current;
-
-    container.scrollTop =
-      container.scrollHeight - previousScrollHeight + previousScrollTop;
-    pendingScrollAdjustmentRef.current = null;
-  }, [messages, hasMoreMessages]);
-
-  const handleKickedFromTeam = useCallback(
-    (data) => {
-      if (
-        conversationType === "team" &&
-        parseInt(conversationId, 10) === data.teamId
-      ) {
-        revokeTeamChatAccess(data.teamId, "You have been removed from this team.");
-        return;
-      }
-
-      setConversations((prev) =>
-        prev.filter((c) => !(c.type === "team" && c.id === data.teamId)),
-      );
-    },
-    [conversationId, conversationType, revokeTeamChatAccess, setConversations],
-  );
-
-  // Set up WebSocket event listeners
-  useSocketEvents((socket) => {
-    if (!socket || !isAuthenticated) {
-      return undefined;
-    }
-
-    // Handle online users
-    const handleOnlineUsers = (users) => {
-      setOnlineUsers(users);
-    };
-
-    // Handle new messages
-    const handleNewMessage = (message) => {
-      const messageTarget = getMessageConversationTarget(message, user?.id);
-      const messageConvId = String(
-        messageTarget.conversationId ?? message.conversationId,
-      );
-      const currentConvId = String(conversationId);
-
-      // Get current conversation type from URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const currentType = urlParams.get("type") || "direct";
-
-      // Check if message belongs to current conversation
-      let isForCurrentConversation = false;
-
-      if (message.type === currentType) {
-        if (currentType === "team") {
-          // For team chats: conversationId must match
-          isForCurrentConversation = messageConvId === currentConvId;
-        } else {
-          // For DMs: either I sent it to this person, or this person sent it to me
-          const isSentByMe =
-            message.senderId === user?.id && messageConvId === currentConvId;
-          const isReceivedFromThem = String(message.senderId) === currentConvId;
-          isForCurrentConversation = isSentByMe || isReceivedFromThem;
-        }
-      }
-
-      if (isForCurrentConversation) {
-        if (currentType === "team") {
-          const parsedMessage = parseSystemMessage(message.content);
-          const removedMemberId =
-            parsedMessage?.memberId ?? parsedMessage?.userId ?? null;
-
-          if (
-            ["member_removed", "member_removed_public"].includes(parsedMessage?.type) &&
-            removedMemberId != null &&
-            String(removedMemberId) === String(user?.id)
-          ) {
-            revokeTeamChatAccess(
-              messageConvId,
-              "You have been removed from this team.",
-            );
-            return;
-          }
-        }
-
-        setMessages((prev) => {
-          // If this is our own message, replace the optimistic version
-          if (message.senderId === user.id) {
-            const withoutOptimistic = prev.filter(
-              (msg) => !msg.isOptimistic || msg.senderId !== user.id,
-            );
-
-            const messageExists = withoutOptimistic.some(
-              (msg) => msg.id === message.id,
-            );
-            if (messageExists) {
-              return prev;
-            }
-
-            const newMessage = {
-              id: message.id,
-              senderId: message.senderId,
-              content: message.content,
-              imageUrl: message.imageUrl,
-              fileUrl: message.fileUrl,
-              fileName: message.fileName,
-              createdAt: message.createdAt,
-              senderUsername: message.senderUsername,
-              type: message.type,
-              fileSize: message.fileSize,
-              fileExpiresAt: message.fileExpiresAt,
-              fileDeletedAt: message.fileDeletedAt,
-              readCount: message.readCount,
-              recipientCount: message.recipientCount,
-              readByUsers: message.readByUsers,
-              editedAt: message.editedAt || message.edited_at,
-              editedBy: message.editedBy ?? message.edited_by,
-              isEdited: message.isEdited || message.is_edited,
-              replyTo: message.replyTo,
-              replyToId: message.replyToId || message.reply_to_id,
-            };
-
-            return dedupeMessages([...withoutOptimistic, newMessage]);
-          } else {
-            const messageExists = prev.some((msg) => msg.id === message.id);
-            if (messageExists) {
-              return prev;
-            }
-
-            const newMessage = {
-              id: message.id,
-              senderId: message.senderId,
-              content: message.content,
-              imageUrl: message.imageUrl,
-              fileUrl: message.fileUrl,
-              fileName: message.fileName,
-              createdAt: message.createdAt,
-              senderUsername: message.senderUsername,
-              type: message.type,
-              fileSize: message.fileSize,
-              fileExpiresAt: message.fileExpiresAt,
-              fileDeletedAt: message.fileDeletedAt,
-              readCount: message.readCount,
-              recipientCount: message.recipientCount,
-              readByUsers: message.readByUsers,
-              editedAt: message.editedAt || message.edited_at,
-              editedBy: message.editedBy ?? message.edited_by,
-              isEdited: message.isEdited || message.is_edited,
-              replyTo: message.replyTo,
-              replyToId: message.replyToId || message.reply_to_id,
-            };
-
-            return dedupeMessages([...prev, newMessage]);
-          }
-        });
-
-        // Mark as read if viewing and didn't send it
-        if (message.senderId !== user.id) {
-          const urlParams = new URLSearchParams(window.location.search);
-          const type = urlParams.get("type") || "direct";
-          socketService.markMessagesAsRead(currentConvId, type);
-        }
-      }
-
-      // Update conversation list
-      setConversations((prev) => {
-        const isUnreadIncoming =
-          messageConvId !== currentConvId && message.senderId !== user.id;
-        const lastMessagePreview = buildConversationLastMessagePreview(message);
-        let conversationUpdated = false;
-        const updatedList = prev.map((conv) => {
-          if (String(conv.id) === messageConvId) {
-            conversationUpdated = true;
-            const currentUnreadCount = conv.unreadCount ?? conv.unread_count ?? 0;
-            const unreadCount = isUnreadIncoming
-              ? currentUnreadCount + 1
-              : currentUnreadCount;
-
-            return {
-              ...conv,
-              lastMessage: lastMessagePreview,
-              updatedAt: message.createdAt,
-              isVirtual: false,
-              unreadCount,
-              unread_count: unreadCount,
-            };
-          }
-          return conv;
-        });
-
-        if (!conversationUpdated) {
-          if (messageTarget.type === "direct" && message.senderId !== user.id) {
-            updatedList.unshift({
-              id: Number.isNaN(Number(messageConvId))
-                ? messageConvId
-                : Number(messageConvId),
-              type: "direct",
-              partner: {
-                id: message.senderId,
-                username: message.senderUsername,
-                firstName: message.senderFirstName,
-                lastName: message.senderLastName,
-                avatarUrl: message.senderAvatarUrl,
-              },
-              lastMessage: lastMessagePreview,
-              updatedAt: message.createdAt,
-              unreadCount: isUnreadIncoming ? 1 : 0,
-              unread_count: isUnreadIncoming ? 1 : 0,
-            });
-          }
-
-          refreshConversationList();
-        }
-
-        const deduplicatedList = dedupeConversations(updatedList);
-
-        return deduplicatedList.sort((a, b) => {
-          const aDate = normalizeTimestampToDate(a.updatedAt)?.getTime() ?? 0;
-          const bDate = normalizeTimestampToDate(b.updatedAt)?.getTime() ?? 0;
-          return bDate - aDate;
-        });
-      });
-    };
-
-    const refreshTeamEventMessages = async (payload) => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const currentType = urlParams.get("type") || "direct";
-      const activeTeamId =
-        activeConversationRef.current?.team?.id ?? activeConversationRef.current?.id;
-      const teamId =
-        getPayloadTeamId(payload) ??
-        (currentType === "team" ? activeTeamId : null);
-      if (!teamId) return;
-
-      if (isCurrentUserRemovalPayload(payload, user?.id)) {
-        revokeTeamChatAccess(teamId, "You have been removed from this team.");
-        return;
-      }
-
-      refreshConversationList();
-
-      if (
-        currentType !== "team" ||
-        String(teamId) !== String(conversationId)
-      ) {
-        return;
-      }
-
-      try {
-        const canStillAccess = await refreshActiveTeamMembership(teamId);
-
-        if (!canStillAccess) {
-          return;
-        }
-
-        const messagesResponse = await messageService.getMessages(
-          teamId,
-          "team",
-        );
-        const fetchedMessages = messagesResponse.data || [];
-        setHasMoreMessages(messagesResponse.hasMore || false);
-        setMessages(dedupeMessages(fetchedMessages));
-        socketService.markMessagesAsRead(teamId, "team");
-      } catch (err) {
-        console.error("Error refreshing team event messages:", err);
-      }
-    };
-
-    // Handle typing indicators
-    const handleTypingUpdate = async (data) => {
-      if (String(data.conversationId) !== String(conversationId)) {
-        return;
-      }
-
-      const typingUserId = resolveTypingUserId(data);
-      if (!typingUserId) {
-        return;
-      }
-
-      let displayName = resolveTypingDisplayName(data) || "User";
-      const conversationUser = resolveConversationUser(activeConversation, typingUserId);
-
-      if (conversationUser) {
-        displayName = formatDisplayName(conversationUser);
-      } else if (users[typingUserId]) {
-        displayName = formatDisplayName(users[typingUserId]);
-      } else if (data.isTyping) {
-        try {
-          const userData = await userService.getUserById(typingUserId);
-          setUsers((prev) => ({ ...prev, [typingUserId]: userData }));
-          displayName = formatDisplayName(userData);
-        } catch (error) {
-          console.error("Error fetching user for typing:", error);
-          displayName = resolveTypingDisplayName(data) || "User";
-        }
-      }
-
-      setTypingUsers((prev) => {
-        const updated = {
-          ...prev,
-          [typingUserId]: data.isTyping ? displayName : null,
-        };
-
-        Object.keys(updated).forEach((key) => {
-          if (updated[key] === null) {
-            delete updated[key];
-          }
-        });
-
-        return updated;
-      });
-    };
-
-    // Handle message status updates
-    const handleMessageStatus = (data) => {
-      if (String(data.conversationId) === String(conversationId)) {
-        const readCountByMessageId = new Map(
-          (data.messageReadCounts || []).map((status) => [
-            String(status.messageId),
-            status,
-          ]),
-        );
-
-        setMessages((prev) =>
-          prev.map((msg) => {
-            if (data.type === "team") {
-              const status = readCountByMessageId.get(String(msg.id));
-
-              if (!status) {
-                return msg;
-              }
-
-              return {
-                ...msg,
-                readAt: msg.readAt || status.firstReadAt || data.readAt,
-                readCount: status.readCount,
-                recipientCount: status.recipientCount,
-                readByUsers: status.readByUsers || msg.readByUsers,
-              };
-            }
-
-            if (msg.senderId !== user.id) {
-              return msg;
-            }
-
-            return {
-              ...msg,
-              readAt: msg.readAt || data.readAt,
-              readCount: 1,
-              recipientCount: 1,
-            };
-          }),
-        );
-      }
-    };
-
-    // Handle conversation updates
-    const handleConversationUpdate = (data) => {
-      setConversations((prev) => {
-        const conversationIndex = prev.findIndex(
-          (c) => String(c.id) === String(data.id),
-        );
-
-        if (conversationIndex === -1) {
-          refreshConversationList();
-          return prev;
-        }
-
-        const updatedList = [...prev];
-        updatedList[conversationIndex] = {
-          ...updatedList[conversationIndex],
-          lastMessage:
-            buildConversationLastMessagePreview(data) ||
-            data.lastMessage ||
-            updatedList[conversationIndex].lastMessage,
-          updatedAt: data.updatedAt,
-        };
-
-        const deduplicatedList = dedupeConversations(updatedList);
-
-        return deduplicatedList.sort((a, b) => {
-          const aDate = normalizeTimestampToDate(a.updatedAt)?.getTime() ?? 0;
-          const bDate = normalizeTimestampToDate(b.updatedAt)?.getTime() ?? 0;
-          return bDate - aDate;
-        });
-      });
-    };
-
-    const handleTeamMemberLeft = (data) => {
-      if (!data?.teamId) return;
-      const leftUserId = data.userId ?? data.user_id ?? null;
-
-      setTeamMembersRefreshSignal({
-        teamId: data.teamId,
-        userId: leftUserId,
-        receivedAt: Date.now(),
-      });
-
-      const hasTeamConversation = conversationsRef.current.some(
-        (conversation) =>
-          conversation.type === "team" &&
-          String(conversation.id) === String(data.teamId),
-      );
-
-      if (hasTeamConversation) {
-        refreshConversationList();
-      }
-
-      const activeTeamId =
-        activeConversationRef.current?.team?.id ?? activeConversationRef.current?.id;
-
-      if (String(activeTeamId) !== String(data.teamId)) {
-        return;
-      }
-
-      if (leftUserId != null && String(leftUserId) === String(user?.id)) {
-        revokeTeamChatAccess(data.teamId, "You have left this team chat.");
-        return;
-      }
-
-      refreshActiveTeamMembership(data.teamId)
-        .catch((err) =>
-          console.error("Error refreshing active team members:", err),
-        );
-    };
-
-    const handleConversationDeleted = (data) => {
-      if (!data?.partnerId) return;
-
-      setConversations((prev) =>
-        prev.filter(
-          (conversation) =>
-            !isDirectConversationForPartner(conversation, data.partnerId),
-        ),
-      );
-
-      const currentUrlType =
-        new URLSearchParams(window.location.search).get("type") ||
-        activeConversationRef.current?.type ||
-        "direct";
-
-      const activePartnerId =
-        getConversationPartnerId(activeConversationRef.current) ??
-        getConversationPartnerId(
-          conversationsRef.current.find(
-            (conversation) =>
-              conversation.type === "direct" &&
-              String(conversation.id) === String(conversationId),
-          ),
-        );
-
-      const isCurrentConversationDeleted =
-        currentUrlType === "direct" &&
-        (String(activePartnerId ?? "") === String(data.partnerId) ||
-          String(conversationId ?? "") === String(data.partnerId));
-
-      if (!isCurrentConversationDeleted) {
-        return;
-      }
-
-      setError("This conversation is no longer available.");
-      setActiveConversation(null);
-      setMessages([]);
-      setTypingUsers({});
-      setHighlightMessageIds([]);
-      setHasMoreMessages(false);
-      navigate("/chat", { replace: true });
-    };
-
-    // Handle message deleted (soft delete broadcast)
-    const handleMessageDeleted = (payload) => {
-      // payload: { messageId, deletedAt, deletedBy, type, teamId, senderId, receiverId }
-      setMessages((prev) =>
-        prev.map((m) =>
-          String(m.id) === String(payload.messageId)
-            ? {
-                ...m,
-                deletedAt: payload.deletedAt || new Date().toISOString(),
-                deletedBy: payload.deletedBy,
-                content: null,
-                imageUrl: null,
-                fileUrl: null,
-                fileName: null,
-                fileSize: null,
-              }
-            : m,
-        ),
-      );
-      refreshConversationList();
-    };
-
-    const handleMessageEdited = (payload) => {
-      const messageId = payload.messageId ?? payload.id;
-      if (!messageId) return;
-      const nextContent = payload.content;
-
-      setMessages((prev) =>
-        prev.map((m) =>
-          String(m.id) === String(messageId)
-            ? {
-                ...m,
-                content: nextContent ?? m.content,
-                editedAt:
-                  payload.editedAt ||
-                  payload.edited_at ||
-                  payload.updatedAt ||
-                  payload.updated_at ||
-                  new Date().toISOString(),
-                editedBy: payload.editedBy ?? payload.edited_by ?? m.editedBy,
-                isEdited: true,
-              }
-            : m,
-        ),
-      );
-
-      if (payload.isLatestMessage || payload.isLastMessage) {
-        setConversations((prev) =>
-          prev.map((conversation) =>
-            String(conversation.id) === String(payload.conversationId) ||
-            (payload.type === "direct" &&
-              (String(conversation.id) === String(payload.senderId) ||
-                String(conversation.id) === String(payload.receiverId)))
-              ? {
-                  ...conversation,
-                  lastMessage: nextContent ?? conversation.lastMessage,
-                }
-              : conversation,
-          ),
-        );
-      }
-    };
-
-    // Subscribe to events
-    socket.on("users:online", handleOnlineUsers);
-    socket.on("message:received", handleNewMessage);
-    socket.on("typing:update", handleTypingUpdate);
-    socket.on("message:status", handleMessageStatus);
-    socket.on("conversation:updated", handleConversationUpdate);
-    socket.on("team:member_left", handleTeamMemberLeft);
-    socket.on("conversation:deleted", handleConversationDeleted);
-    socket.on("team:member_kicked", handleKickedFromTeam);
-    socket.on("message:deleted", handleMessageDeleted);
-    socket.on("message:edited", handleMessageEdited);
-    socket.on("notification:new", refreshTeamEventMessages);
-
-    // Cleanup function to remove listeners
-    return () => {
-      socket.off("users:online", handleOnlineUsers);
-      socket.off("message:received", handleNewMessage);
-      socket.off("typing:update", handleTypingUpdate);
-      socket.off("message:status", handleMessageStatus);
-      socket.off("conversation:updated", handleConversationUpdate);
-      socket.off("team:member_left", handleTeamMemberLeft);
-      socket.off("conversation:deleted", handleConversationDeleted);
-      socket.off("team:member_kicked", handleKickedFromTeam);
-      socket.off("message:deleted", handleMessageDeleted);
-      socket.off("message:edited", handleMessageEdited);
-      socket.off("notification:new", refreshTeamEventMessages);
-    };
-  }, [
-    conversationId,
-    handleKickedFromTeam,
-    fetchTeamDetails,
+    conversationType,
+    conversationsRef,
+    dedupeMessages,
+    handleTypingUpdate,
     isAuthenticated,
     navigate,
     refreshActiveTeamMembership,
     refreshConversationList,
     revokeTeamChatAccess,
-    activeConversation,
-    searchParams,
-    user?.id,
-    user?.username,
-    users,
-  ]);
+    setActiveConversation,
+    setConversations,
+    setError,
+    setHasMoreMessages,
+    setHighlightMessageIds,
+    setMessages,
+    setOnlineUsers,
+    setTeamMembersRefreshSignal,
+    user,
+  });
 
   const handleHeaderTeamClick = (e) => {
     e.stopPropagation();
@@ -2557,499 +536,46 @@ const Chat = () => {
     }
   };
 
-  const closePendingChatAction = () => {
-    if (pendingChatActionLoading) return;
-    setPendingChatAction(null);
-  };
-
-  // Handle leaving a deleted team (removes from conversation list)
-  const handleLeaveTeam = async () => {
-    if (!activeConversation?.team?.id) {
-      return;
-    }
-
-    const teamId = activeConversation.team.id;
-    const teamName = activeConversation.team.name || "this team";
-
-    setPendingChatAction({ type: "leave-team", teamId, teamName });
-  };
-
-  const executeLeaveTeam = async ({ teamId }) => {
-    try {
-      // Call the existing leave team API
-      await teamService.removeTeamMember(teamId, user.id);
-
-      // Remove from local conversation list
-      setConversations((prev) => prev.filter((c) => c.id !== teamId));
-
-      // Navigate away
-      navigate("/chat");
-
-      setActiveConversation(null);
-      setMessages([]);
-      setShowChatView(false);
-      return true;
-    } catch (error) {
-      console.error("Error leaving team:", error);
-      setError("Failed to leave team. Please try again.");
-      return false;
-    }
-  };
-
-  const handleTeamDetailsLeave = (teamId) => {
-    if (!teamId) return;
-
-    setConversations((prev) =>
-      prev.filter(
-        (conversation) =>
-          !(conversation.type === "team" && String(conversation.id) === String(teamId)),
-      ),
-    );
-
-    if (String(conversationId) === String(teamId)) {
-      setActiveConversation(null);
-      setMessages([]);
-      setTypingUsers({});
-      setReplyingTo(null);
-      setShowChatView(false);
-      setIsTeamModalOpen(false);
-      setSelectedTeamId(null);
-      setSelectedTeamData(null);
-      navigate("/chat", { replace: true });
-    }
-  };
-
-  // Handle deleting a conversation from the list
-  const handleDeleteConversation = async () => {
-    if (!activeConversation) {
-      return;
-    }
-
-    setPendingChatAction({
-      type: "delete-conversation",
-      conversationId: activeConversation.id,
-    });
-  };
-
-  const executeDeleteConversation = async ({ conversationId }) => {
-    try {
-      const convId = conversationId;
-
-      // Remove from local state
-      setConversations((prev) => prev.filter((c) => c.id !== convId));
-
-      // Navigate away
-      navigate("/chat");
-
-      setActiveConversation(null);
-      setMessages([]);
-      return true;
-    } catch (error) {
-      console.error("Error deleting conversation:", error);
-      setError("Failed to delete conversation. Please try again.");
-      return false;
-    }
-  };
-
-  const handleReplyToMessage = useCallback((message) => {
-    setReplyingTo({
-      id: message.id,
-      content: message.content,
-      createdAt: message.createdAt || message.created_at,
-      senderId: message.senderId || message.sender_id,
-      senderUsername: message.senderUsername || message.sender_username,
-      senderFirstName:
-        message.senderFirstName ||
-        message.sender_first_name ||
-        message.senderName,
-      imageUrl: message.imageUrl || message.image_url,
-      fileUrl: message.fileUrl || message.file_url,
-      fileName: message.fileName || message.file_name,
-      fileSize: message.fileSize || message.file_size,
-      fileExpiresAt: message.fileExpiresAt || message.file_expires_at,
-      fileDeletedAt: message.fileDeletedAt || message.file_deleted_at,
-    });
-  }, []);
-
-  const handleClearReply = useCallback(() => {
-    setReplyingTo(null);
-  }, []);
-
-  const loadEarlierMessages = async () => {
-    if (loadingMore || !hasMoreMessages || messages.length === 0) return;
-
-    const container = messagesContainerRef.current;
-
-    if (container) {
-      pendingScrollAdjustmentRef.current = {
-        previousScrollHeight: container.scrollHeight,
-        previousScrollTop: container.scrollTop,
-      };
-    }
-
-    setLoadingMore(true);
-
-    try {
-      const oldestMessage = messages[0];
-      const type = searchParams.get("type") || "direct";
-      const response = await messageService.getMessages(conversationId, type, {
-        before: oldestMessage.id,
-        limit: 50,
-      });
-      const olderMessages = response.data || [];
-
-      setHasMoreMessages(response.hasMore || false);
-
-      if (olderMessages.length > 0) {
-        setMessages((prev) => dedupeMessages([...olderMessages, ...prev]));
-      } else {
-        pendingScrollAdjustmentRef.current = null;
-      }
-    } catch (err) {
-      pendingScrollAdjustmentRef.current = null;
-      console.error("Error loading earlier messages:", err);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  const handleSendFile = async (file) => {
-    if (!canSendInActiveConversation || !file) {
-      if (!isCurrentUserActiveTeamMember) {
-        setError("You no longer have access to this team chat.");
-      }
-      return;
-    }
-
-    try {
-      // Upload file attachment before sending the message
-      const uploadResult = await uploadToImageKit(file, "chatFiles");
-
-      if (!uploadResult.success) {
-        setError(uploadResult.error || "Failed to upload file");
-        return;
-      }
-
-      // Get conversation type and target ID
-      const type = searchParams.get("type") || "direct";
-      const targetId =
-        type === "team"
-          ? activeConversation.team?.id
-          : activeConversation.partner?.id;
-
-      if (type === "team") {
-        const canStillAccess = await refreshActiveTeamMembership(targetId);
-        if (!canStillAccess) return;
-      }
-
-      // Send message with file via socket
-      socketService.sendMessage(
-        targetId,
-        null,
-        type,
-        null,
-        uploadResult.url,
-        file.name,
-        replyingTo?.id,
-      );
-      setReplyingTo(null);
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      setError("Failed to upload file. Please try again.");
-    }
-  };
-
-  const handleSendImage = async (file) => {
-    if (!canSendInActiveConversation || !file) {
-      if (!isCurrentUserActiveTeamMember) {
-        setError("You no longer have access to this team chat.");
-      }
-      return;
-    }
-
-    try {
-      // Upload image attachment before sending the message
-      const uploadResult = await uploadToImageKit(file, "chatImages");
-
-      if (!uploadResult.success) {
-        setError(uploadResult.error || "Failed to upload image");
-        return;
-      }
-
-      // Get conversation type and target ID
-      const type = searchParams.get("type") || "direct";
-      const targetId =
-        type === "team"
-          ? activeConversation.team?.id
-          : activeConversation.partner?.id;
-
-      if (type === "team") {
-        const canStillAccess = await refreshActiveTeamMembership(targetId);
-        if (!canStillAccess) return;
-      }
-
-      // Send message with image via socket
-      socketService.sendMessage(
-        targetId,
-        null,
-        type,
-        uploadResult.url,
-        null,
-        file.name,
-        replyingTo?.id,
-      );
-      setReplyingTo(null);
-    } catch (error) {
-      console.error("Error uploading image:", error);
-      setError("Failed to upload image. Please try again.");
-    }
-  };
-
-  // Delete message (soft delete)
-  const handleDeleteMessage = async (messageId) => {
-    if (!messageId) return;
-
-    setPendingChatAction({ type: "delete-message", messageId });
-  };
-
-  const executeDeleteMessage = async ({ messageId }) => {
-    try {
-      if ((searchParams.get("type") || "direct") === "team") {
-        const canStillAccess = await refreshActiveTeamMembership(conversationId);
-        if (!canStillAccess) return false;
-      }
-
-      // Optimistic UI update
-      setMessages((prev) =>
-        prev.map((m) =>
-          String(m.id) === String(messageId)
-            ? {
-                ...m,
-                deletedAt: new Date().toISOString(),
-                deletedBy: user?.id,
-                content: null,
-                imageUrl: null,
-                fileUrl: null,
-                fileName: null,
-                fileSize: null,
-              }
-            : m,
-        ),
-      );
-
-      await messageService.deleteMessage(messageId);
-      return true;
-    } catch (err) {
-      console.error("Failed to delete message:", err);
-      setError("Failed to delete message. Please try again.");
-
-      // Optional: re-fetch messages for correctness after failure
-      // (you can leave this out if you don’t want)
-      return false;
-    }
-  };
-
-  const confirmPendingChatAction = async () => {
-    if (!pendingChatAction) return;
-
-    try {
-      setPendingChatActionLoading(true);
-
-      let actionSucceeded = false;
-
-      if (pendingChatAction.type === "leave-team") {
-        actionSucceeded = await executeLeaveTeam(pendingChatAction);
-      } else if (pendingChatAction.type === "delete-conversation") {
-        actionSucceeded = await executeDeleteConversation(pendingChatAction);
-      } else if (pendingChatAction.type === "delete-message") {
-        actionSucceeded = await executeDeleteMessage(pendingChatAction);
-      }
-
-      if (actionSucceeded) {
-        setPendingChatAction(null);
-      }
-    } finally {
-      setPendingChatActionLoading(false);
-    }
-  };
-
-  const handleEditMessage = async (messageId, content) => {
-    if (!messageId) return;
-
-    const trimmedContent = content.trim();
-    if (!trimmedContent) {
-      throw new Error("Message cannot be empty.");
-    }
-
-    if ((searchParams.get("type") || "direct") === "team") {
-      const canStillAccess = await refreshActiveTeamMembership(conversationId);
-      if (!canStillAccess) return;
-    }
-
-    const previousMessage = messages.find(
-      (m) => String(m.id) === String(messageId),
-    );
-    const isLatestMessage =
-      messages.length > 0 &&
-      String(messages[messages.length - 1]?.id) === String(messageId);
-    const editedAt = new Date().toISOString();
-
-    setMessages((prev) =>
-      prev.map((m) =>
-        String(m.id) === String(messageId)
-          ? {
-              ...m,
-              content: trimmedContent,
-              editedAt,
-              editedBy: user?.id,
-              isEdited: true,
-            }
-          : m,
-      ),
-    );
-
-    if (isLatestMessage) {
-      setConversations((prev) =>
-        prev.map((conversation) =>
-          String(conversation.id) === String(conversationId)
-            ? {
-                ...conversation,
-                lastMessage: trimmedContent,
-              }
-            : conversation,
-        ),
-      );
-    }
-
-    try {
-      const response = await messageService.updateMessage(
-        messageId,
-        trimmedContent,
-      );
-      const updatedMessage = response?.data || response?.message || response;
-
-      if (updatedMessage && typeof updatedMessage === "object") {
-        setMessages((prev) =>
-          prev.map((m) =>
-            String(m.id) === String(messageId)
-              ? {
-                  ...m,
-                  ...updatedMessage,
-                  content: updatedMessage.content ?? trimmedContent,
-                  editedAt:
-                    updatedMessage.editedAt ||
-                    updatedMessage.edited_at ||
-                    updatedMessage.updatedAt ||
-                    updatedMessage.updated_at ||
-                    editedAt,
-                  editedBy:
-                    updatedMessage.editedBy ??
-                    updatedMessage.edited_by ??
-                    user?.id,
-                  isEdited: true,
-                }
-              : m,
-          ),
-        );
-      }
-    } catch (err) {
-      if (previousMessage) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            String(m.id) === String(messageId) ? previousMessage : m,
-          ),
-        );
-      }
-      if (isLatestMessage) {
-        setConversations((prev) =>
-          prev.map((conversation) =>
-            String(conversation.id) === String(conversationId)
-              ? {
-                  ...conversation,
-                  lastMessage: previousMessage?.content || conversation.lastMessage,
-                }
-              : conversation,
-          ),
-        );
-      }
-      console.error("Failed to edit message:", err);
-      setError("Failed to edit message. Please try again.");
-      throw err;
-    }
-  };
-
-  const handleSendMessage = async (content) => {
-    if (!content.trim() || !conversationId) return;
-    if (!canSendInActiveConversation) {
-      if (!isCurrentUserActiveTeamMember) {
-        setError("You no longer have access to this team chat.");
-      }
-      return;
-    }
-
-    // Get type from URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    const type = urlParams.get("type") || "direct";
-
-    if (type === "team") {
-      const canStillAccess = await refreshActiveTeamMembership(conversationId);
-      if (!canStillAccess) return;
-    }
-
-    // Create optimistic message (show immediately)
-    const optimisticMessage = {
-      id: `temp-${Date.now()}`,
-      senderId: user.id,
-      content: content,
-      createdAt: new Date().toISOString(),
-      senderUsername: user.username,
-      type: type,
-      isOptimistic: true,
-      replyTo: replyingTo,
-      replyToId: replyingTo?.id,
-    };
-
-    // Add optimistic message to UI immediately
-    setMessages((prev) => [...prev, optimisticMessage]);
-
-    // Send message via WebSocket
-    socketService.sendMessage(
-      conversationId,
-      content,
-      type,
-      null,
-      null,
-      null,
-      replyingTo?.id,
-    );
-    setReplyingTo(null);
-
-    // Clear typing indicator
-    clearTimeout(typingTimeoutRef.current);
-    socketService.sendTypingStop(conversationId, type);
-  };
-
-  const handleTyping = (isTyping, type = "direct") => {
-    if (!conversationId) return;
-
-    // Clear existing timeout
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    if (isTyping) {
-      socketService.sendTypingStart(conversationId, type, {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-      });
-      typingTimeoutRef.current = setTimeout(() => {
-        socketService.sendTypingStop(conversationId, type);
-      }, 3000);
-    } else {
-      socketService.sendTypingStop(conversationId, type);
-    }
-  };
+  const {
+    closePendingChatAction,
+    handleLeaveTeam,
+    handleTeamDetailsLeave,
+    handleDeleteConversation,
+    handleReplyToMessage,
+    handleClearReply,
+    handleSendFile,
+    handleSendImage,
+    handleDeleteMessage,
+    confirmPendingChatAction,
+    handleEditMessage,
+    handleSendMessage,
+  } = useChatMessageActions({
+    activeConversation,
+    conversationId,
+    messages,
+    user,
+    replyingTo,
+    pendingChatAction,
+    pendingChatActionLoading,
+    canSendInActiveConversation,
+    isCurrentUserActiveTeamMember,
+    searchParams,
+    navigate,
+    refreshActiveTeamMembership,
+    handleTyping,
+    clearTypingUsers,
+    setPendingChatAction,
+    setPendingChatActionLoading,
+    setReplyingTo,
+    setConversations,
+    setActiveConversation,
+    setMessages,
+    setShowChatView,
+    setError,
+    setIsTeamModalOpen,
+    setSelectedTeamId,
+    setSelectedTeamData,
+  });
 
   const selectConversation = (id) => {
     // Deselect only when the chat panel is actually open for this conversation.
@@ -3091,17 +617,12 @@ const Chat = () => {
 
     // When search is active, reveal the chat panel
     if (isChatSearchActive) {
-      setSearchChatVisible(true);
+      revealSearchChat();
     }
 
     // Navigate with type parameter
     navigate(`/chat/${id}?type=${type}`);
   };
-
-  // Get active typing users for current conversation
-  const activeTypingUsers = Object.entries(typingUsers)
-    .filter(([userId, username]) => userId !== user?.id && username)
-    .map(([, username]) => username);
 
   const pendingChatActionType = pendingChatAction?.type;
   const pendingChatActionConfig = {
@@ -3132,18 +653,12 @@ const Chat = () => {
       icon: <LogOut size={16} />,
     },
   }[pendingChatActionType];
-  const isNoSearchResults =
-    isChatSearchActive && !searchingChatMessages && filteredConversations.length === 0;
-  const hideChatDuringSearch = isChatSearchActive && !searchChatVisible;
   const shouldShowConversationPanel =
     !showEmptyConversationState &&
     !hideChatDuringSearch &&
     Boolean(conversationId) &&
     showChatView &&
     (Boolean(activeConversation) || loadingMessages);
-  const totalSearchMatches = isChatSearchActive
-    ? filteredConversations.reduce((sum, conv) => sum + (conv.searchMatchCount || 0), 0)
-    : 0;
   const chatSearchPlaceholder = "Search chats...";
   const chatSearchInputWidth = `${Math.max(
     chatSearchQuery.length,
@@ -3188,15 +703,6 @@ const Chat = () => {
       )}
     </div>
   );
-  const chatSearchEmptyState =
-    isChatSearchActive && searchingChatMessages
-      ? {
-          title: "Searching chats...",
-          description: `Looking through message history for "${chatSearchQuery.trim()}".`,
-          showActions: false,
-        }
-      : null;
-
   return (
     <PageContainer
       title="Chats"
@@ -3253,273 +759,69 @@ const Chat = () => {
       </Modal>
 
       <div className="flex h-[calc(100vh-200px)] gap-2">
-        {/* Conversation List - Left Sidebar */}
-        <div
-          data-conversation-list-viewport="true"
-          className={`lomir-conversation-list-scrollbar overflow-y-auto transition-all duration-300 ${
-            showEmptyConversationState || hideChatDuringSearch || !shouldShowConversationPanel
-              ? "w-full"
-              : "hidden md:block md:w-1/3"
-          }`}
-          style={{ direction: "rtl" }}
-        >
-          <div className="h-full" style={{ direction: "ltr" }}>
-            <ConversationList
-              conversations={isNoSearchResults ? conversations : filteredConversations}
-              activeConversationId={conversationId}
-              onSelectConversation={selectConversation}
-              loading={loading}
-              onlineUsers={onlineUsers}
-              onActiveConversationVisibilityChange={
-                handleActiveConversationVisibilityChange
-              }
-              teamMembersRefreshSignal={teamMembersRefreshSignal}
-              emptyState={isNoSearchResults ? null : chatSearchEmptyState}
-              searchQuery={isNoSearchResults ? "" : chatSearchQuery}
-              chatVisible={!hideChatDuringSearch && showChatView}
-              currentUser={user}
-            />
-          </div>
-        </div>
+        <ConversationSidebar
+          fullWidth={
+            showEmptyConversationState ||
+            hideChatDuringSearch ||
+            !shouldShowConversationPanel
+          }
+          conversations={isNoSearchResults ? conversations : filteredConversations}
+          activeConversationId={conversationId}
+          onSelectConversation={selectConversation}
+          loading={loading}
+          onlineUsers={onlineUsers}
+          onActiveConversationVisibilityChange={
+            handleActiveConversationVisibilityChange
+          }
+          teamMembersRefreshSignal={teamMembersRefreshSignal}
+          emptyState={isNoSearchResults ? null : chatSearchEmptyState}
+          searchQuery={isNoSearchResults ? "" : chatSearchQuery}
+          chatVisible={!hideChatDuringSearch && showChatView}
+          currentUser={user}
+        />
 
-        {/* Message Display - Right Side */}
         {shouldShowConversationPanel && (
-        <div className={`bg-white shadow-soft rounded-xl overflow-hidden flex flex-col min-w-0 transition-all duration-300 ${
-          showChatView ? "w-full md:w-2/3" : "hidden md:flex md:w-2/3"
-        }`}>
-          {conversationId ? (
-            <>
-              {/* Compact header, also shown on desktop when both regular headers are out of view */}
-              <div
-                className={`flex items-center justify-between border-b border-base-200 p-3 md:p-4 bg-base-100 ${
-                  showCompactConversationHeader ? "md:flex" : "md:hidden"
-                }`}
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {/* Back/List toggle button - visible on small screens */}
-                  <Tooltip
-                    content="Back to conversation list"
-                    position="bottom"
-                    wrapperClassName="md:hidden inline-flex items-center flex-shrink-0"
-                  >
-                    <button
-                      onClick={() => setShowChatView(false)}
-                      className="flex items-center justify-center p-2 hover:bg-base-200 rounded-lg transition-colors"
-                      aria-label="Back to conversation list"
-                    >
-                      <ChevronLeft size={20} />
-                    </button>
-                  </Tooltip>
-                  
-                  {/* Conversation Header - Avatar and name */}
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    {conversationType === "team" && teamData ? (
-                      <Tooltip
-                        content={`View ${teamData.name} details`}
-                        position="bottom"
-                        wrapperClassName="inline-flex items-center flex-shrink-0"
-                      >
-                        <div className="relative">
-                          <TeamAvatar
-                            team={teamData}
-                            sizeClass="w-10 h-10"
-                            clickable={true}
-                            onClick={handleHeaderTeamClick}
-                            initialsClassName="text-sm font-medium"
-                            showDemoOverlay={isSyntheticTeam(teamData)}
-                            demoOverlayTextClassName="text-[7px]"
-                          />
-                          {(activeConversation?.unreadCount || activeConversation?.unread_count) > 0 && (
-                            <CountBadge
-                              count={activeConversation.unreadCount ?? activeConversation.unread_count}
-                              className="absolute -top-1 -left-2 z-10"
-                            />
-                          )}
-                        </div>
-                      </Tooltip>
-                    ) : conversationPartner ? (
-                      <Tooltip
-                        content={`View ${[conversationPartner.firstName, conversationPartner.lastName].filter(Boolean).join(" ")} details`}
-                        position="bottom"
-                        wrapperClassName="inline-flex items-center flex-shrink-0"
-                      >
-                        <div
-                          className="cursor-pointer hover:opacity-80 transition-opacity relative"
-                          onClick={handleHeaderUserClick}
-                        >
-                          <UserAvatar
-                            user={conversationPartner}
-                            sizeClass="w-10 h-10"
-                            iconSize={20}
-                            initialsClassName="text-sm font-medium"
-                            showDemoOverlay
-                            demoOverlayTextClassName="text-[7px]"
-                            demoOverlayTextTranslateClassName="-translate-y-[2px]"
-                          />
-                          {(activeConversation?.unreadCount || activeConversation?.unread_count) > 0 && (
-                            <CountBadge
-                              count={activeConversation.unreadCount ?? activeConversation.unread_count}
-                              className="absolute -top-1 -left-2 z-10"
-                            />
-                          )}
-                        </div>
-                      </Tooltip>
-                    ) : null}
-                    <div className="min-w-0 flex-1">
-                      <Tooltip
-                        content={
-                          conversationType === "team"
-                            ? `View ${teamData?.name} details`
-                            : `View ${[conversationPartner?.firstName, conversationPartner?.lastName].filter(Boolean).join(" ")} details`
-                        }
-                        position="bottom"
-                        wrapperClassName="block min-w-0"
-                      >
-                        <h3
-                          className="font-medium truncate text-sm cursor-pointer hover:text-primary transition-colors"
-                          onClick={conversationType === "team" ? handleHeaderTeamClick : handleHeaderUserClick}
-                        >
-                          {conversationType === "team" ? teamData?.name : [conversationPartner?.firstName, conversationPartner?.lastName].filter(Boolean).join(" ")}
-                        </h3>
-                      </Tooltip>
-                      {conversationType === "team" ? (
-                        <div className="text-xs text-base-content/60 flex items-center justify-between gap-1.5 flex-nowrap">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Users size={12} className="flex-shrink-0" />
-                            <span className="truncate">
-                              {teamData?.members
-                                ? `Team Chat with ${teamData.members.length} ${teamData.members.length === 1 ? "Member" : "Members"}`
-                                : "Team Chat"}
-                            </span>
-                            {isSyntheticTeam(teamData) && (
-                              <Tooltip
-                                content={DEMO_TEAM_TOOLTIP}
-                                wrapperClassName="flex items-center gap-0.5 text-base-content/50 flex-shrink-0"
-                              >
-                                <FlaskConical size={10} className="flex-shrink-0" />
-                              </Tooltip>
-                            )}
-                          </div>
-                          {conversationUpdatedAt && (
-                            <span className="text-xs text-base-content/50 whitespace-nowrap ml-2">
-                              {formatRelativeChatTimestamp(conversationUpdatedAt)}
-                            </span>
-                          )}
-                        </div>
-                      ) : conversationType === "direct" ? (
-                        <div className="text-xs text-base-content/60 flex items-center justify-between gap-1.5 flex-nowrap">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <User size={12} className="flex-shrink-0" />
-                            <span className="truncate">DM Chat</span>
-                            {isSyntheticUser(conversationPartner) && (
-                              <Tooltip
-                                content={DEMO_PROFILE_TOOLTIP}
-                                wrapperClassName="flex items-center gap-0.5 text-base-content/50 flex-shrink-0"
-                              >
-                                <FlaskConical size={10} className="flex-shrink-0" />
-                              </Tooltip>
-                            )}
-                          </div>
-                          {conversationUpdatedAt && (
-                            <span className="text-xs text-base-content/50 whitespace-nowrap ml-2">
-                              {formatRelativeChatTimestamp(conversationUpdatedAt)}
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div ref={messagesContainerRef} className="flex-grow overflow-y-auto p-4">
-                <MessageDisplay
-                  messages={visibleMessages}
-                  currentUserId={user?.id}
-                  conversationPartner={conversationPartner}
-                  teamData={teamData}
-                  loading={loadingMessages}
-                  typingUsers={activeTypingUsers}
-                  conversationType={conversationType}
-                  teamMembers={teamMembers}
-                  highlightMessageIds={highlightMessageIds}
-                  hasMoreMessages={hasMoreMessages}
-                  loadingMore={loadingMore}
-                  teamMembersRefreshSignal={teamMembersRefreshSignal}
-                  onLoadEarlierMessages={loadEarlierMessages}
-                  onDeleteConversation={handleDeleteConversation}
-                  onDeleteMessage={handleDeleteMessage}
-                  onEditMessage={handleEditMessage}
-                  onLeaveTeam={handleLeaveTeam}
-                  onReply={handleReplyToMessage}
-                  searchQuery={chatSearchQuery}
-                />
-              </div>
-
-              {/* Deleted team banner + message input */}
-              <div className="border-t border-base-200">
-                {/* Show banner for archived teams */}
-                {isActiveTeamArchived &&
-                  conversationType === "team" &&
-                  isCurrentUserActiveTeamMember && (
-                  <div
-                    className="flex flex-col items-center gap-3 px-5 py-4 mx-4 mt-4 rounded-2xl text-center"
-                    style={{
-                      backgroundColor: "rgba(239, 68, 68, 0.1)",
-                      color: "#dc2626",
-                    }}
-                  >
-                    <Archive size={18} className="shrink-0" />
-                    <div className="inline-flex max-w-full rounded-md bg-red-500/10 px-3 py-2 text-sm font-medium text-red-600">
-                      <span>
-                        This team has been archived and is scheduled for
-                        deletion. The chat stays available for{" "}
-                        {activeTeamArchiveTimeRemaining || "up to 14 days"} so
-                        remaining teammates can say goodbye. Leave anytime; once
-                        you leave or the chat is deleted, its messages and files
-                        are no longer accessible.
-                      </span>
-                    </div>
-
-                    <button
-                      onClick={() => handleLeaveTeam()}
-                      className="flex items-center gap-1 text-xs text-red-600 underline opacity-80 transition-opacity hover:opacity-100 hover:no-underline cursor-pointer"
-                    >
-                      <LogOut size={14} />
-                      Leave team chat now
-                    </button>
-                  </div>
-                )}
-
-                <div className="p-4">
-                  <MessageInput
-                    onSendMessage={handleSendMessage}
-                    onSendImage={handleSendImage}
-                    onSendFile={handleSendFile}
-                    onTyping={handleTyping}
-                    disabled={!canSendInActiveConversation}
-                    participants={mentionParticipants}
-                    replyingTo={replyingTo}
-                    onClearReply={handleClearReply}
-                  />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-              <p className="text-base-content/70">
-                Select a conversation to start chatting
-              </p>
-              <button
-                onClick={() => setShowChatView(false)}
-                className="md:hidden flex items-center gap-2 btn btn-sm btn-outline"
-              >
-                <ChevronLeft size={16} />
-                Back to conversations
-              </button>
-            </div>
-          )}
-        </div>
+          <MessageArea
+            showChatView={showChatView}
+            conversationId={conversationId}
+            onBack={() => setShowChatView(false)}
+            messagesContainerRef={messagesContainerRef}
+            showCompactConversationHeader={showCompactConversationHeader}
+            conversationType={conversationType}
+            teamData={teamData}
+            conversationPartner={conversationPartner}
+            activeConversation={activeConversation}
+            conversationUpdatedAt={conversationUpdatedAt}
+            onTeamClick={handleHeaderTeamClick}
+            onUserClick={handleHeaderUserClick}
+            messages={visibleMessages}
+            currentUserId={user?.id}
+            loadingMessages={loadingMessages}
+            typingUsers={activeTypingUsers}
+            teamMembers={teamMembers}
+            highlightMessageIds={highlightMessageIds}
+            hasMoreMessages={hasMoreMessages}
+            loadingMore={loadingMore}
+            teamMembersRefreshSignal={teamMembersRefreshSignal}
+            onLoadEarlierMessages={loadEarlierMessages}
+            onDeleteConversation={handleDeleteConversation}
+            onDeleteMessage={handleDeleteMessage}
+            onEditMessage={handleEditMessage}
+            onLeaveTeam={handleLeaveTeam}
+            onReply={handleReplyToMessage}
+            searchQuery={chatSearchQuery}
+            isActiveTeamArchived={isActiveTeamArchived}
+            isCurrentUserActiveTeamMember={isCurrentUserActiveTeamMember}
+            activeTeamArchiveTimeRemaining={activeTeamArchiveTimeRemaining}
+            onSendMessage={handleSendMessage}
+            onSendImage={handleSendImage}
+            onSendFile={handleSendFile}
+            onTyping={handleTyping}
+            canSendInActiveConversation={canSendInActiveConversation}
+            participants={mentionParticipants}
+            replyingTo={replyingTo}
+            onClearReply={handleClearReply}
+          />
         )}
       </div>
       <TeamDetailsModal
