@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 
+// Grace period (ms) before an interactive tooltip closes, so the pointer can
+// travel from the trigger into the bubble without it disappearing.
+const INTERACTIVE_CLOSE_DELAY = 140;
+
 const TOOLTIP_ARROW_WIDTH = 22.5;
 const TOOLTIP_ARROW_HEIGHT = 12.8;
 const TOOLTIP_ARROW_MASK = `url("data:image/svg+xml,%3Csvg width='22.5' height='12.8' viewBox='0 0 22.5 12.8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0H22.5C17.55 0 15.3 1.408 13.95 4.672L11.7 12.288C11.475 12.672 11.025 12.672 10.8 12.288L8.55 4.672C7.2 1.408 4.95 0 0 0Z' fill='white'/%3E%3C/svg%3E")`;
@@ -23,6 +27,7 @@ const Tooltip = ({
   position = "bottom",
   className = "",
   wrapperClassName = "inline-flex items-center",
+  interactive = false,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -30,6 +35,35 @@ const Tooltip = ({
   const [actualPosition, setActualPosition] = useState(position);
   const triggerRef = useRef(null);
   const tooltipRef = useRef(null);
+  const closeTimerRef = useRef(null);
+
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const open = useCallback(() => {
+    cancelClose();
+    setIsVisible(true);
+  }, [cancelClose]);
+
+  // Non-interactive tooltips close instantly; interactive ones wait a beat so
+  // the pointer can reach the bubble (and its buttons) before it hides.
+  const close = useCallback(() => {
+    if (!interactive) {
+      setIsVisible(false);
+      return;
+    }
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => {
+      setIsVisible(false);
+      closeTimerRef.current = null;
+    }, INTERACTIVE_CLOSE_DELAY);
+  }, [interactive, cancelClose]);
+
+  useEffect(() => () => cancelClose(), [cancelClose]);
 
   const calculatePosition = useCallback(() => {
     if (!triggerRef.current || !tooltipRef.current) return;
@@ -175,10 +209,10 @@ const Tooltip = ({
         ref={triggerRef}
         data-tooltip-trigger="true"
         className={`${wrapperClassName} ${className}`}
-        onMouseEnter={() => setIsVisible(true)}
-        onMouseLeave={() => setIsVisible(false)}
-        onFocus={() => setIsVisible(true)}
-        onBlur={() => setIsVisible(false)}
+        onMouseEnter={open}
+        onMouseLeave={close}
+        onFocus={open}
+        onBlur={close}
       >
         {children}
       </span>
@@ -190,6 +224,8 @@ const Tooltip = ({
             <div
               ref={tooltipRef}
               role="tooltip"
+              onMouseEnter={interactive ? open : undefined}
+              onMouseLeave={interactive ? close : undefined}
               className={`
                 lomir-tooltip-bubble
                 fixed z-[9999]
@@ -198,7 +234,7 @@ const Tooltip = ({
                 rounded-lg
                 whitespace-pre-line text-left
                 max-w-[280px]
-                pointer-events-none
+                ${interactive ? "pointer-events-auto" : "pointer-events-none"}
                 transition-opacity duration-150
               `}
               style={{

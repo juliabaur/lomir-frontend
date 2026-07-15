@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Award,
   Bell,
+  CheckCheck,
   CircleX,
   Crown,
   LogOut,
@@ -112,6 +113,31 @@ const buildNotificationTooltip = (count, types, teamCounts) => {
   );
 };
 
+// Wraps a badge's tooltip summary with a clickable "Mark all as read" action at
+// the top. The tooltip must be interactive (pointer-events enabled) for this.
+const withMarkAllRead = (summary, onMarkAll) => (
+  <div className="flex min-w-[150px] flex-col">
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onMarkAll();
+      }}
+      className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-semibold text-[var(--color-primary-focus)] transition-colors hover:text-[var(--color-primary)]"
+    >
+      <CheckCheck size={12} strokeWidth={2.5} className="flex-shrink-0" />
+      <span>Mark all as read</span>
+    </button>
+    <div className="mt-2 border-t border-base-300 pt-2">
+      {typeof summary === "string" ? (
+        <span className="whitespace-pre-line">{summary}</span>
+      ) : (
+        summary
+      )}
+    </div>
+  </div>
+);
+
 const Navbar = () => {
   const { isAuthenticated, user, logout } = useAuth();
   const [imageError, setImageError] = useState(false);
@@ -142,6 +168,13 @@ const Navbar = () => {
     notificationTypeCounts.messageMention ||
     notificationTypeCounts.message_mention ||
     0;
+  // The bell badge excludes @mentions (those surface on the chat icon).
+  const bellNotificationCount =
+    unreadNotificationCount - messageMentionNotificationCount;
+  // The chat icon has something to clear when there are unread messages or
+  // pending @mention alerts.
+  const hasChatActivity =
+    unreadMessageCount > 0 || messageMentionNotificationCount > 0;
 
   // Fetch unread message count
   const fetchUnreadMessageCount = useCallback(async () => {
@@ -349,6 +382,47 @@ const Navbar = () => {
     }
   };
 
+  // Mark all general (bell) notifications as read. Clears the badge + tooltip
+  // optimistically, then persists; re-syncs from the server on failure.
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    setUnreadNotificationCount(0);
+    setFirstUnreadNotification(null);
+    setNotificationTypeCounts({});
+    setNotificationTypeTeamCounts({});
+    try {
+      await notificationService.markAllAsRead();
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      fetchUnreadNotificationCount();
+    }
+  }, [fetchUnreadNotificationCount]);
+
+  // Mark every conversation (direct + team) as read, plus @mention alerts. The
+  // backend also emits messages:read-all so the chat page's conversation list
+  // clears. We drop the local badge/tooltip immediately for instant feedback.
+  const handleMarkAllMessagesRead = useCallback(async () => {
+    setUnreadMessageCount(0);
+    setFirstUnreadMessage(null);
+    setMessageTeamCount(0);
+    setMessageSenderCount(0);
+    // The mention line on the chat tooltip is fed by notification counts; drop
+    // it locally too (the backend marks those notifications read).
+    setNotificationTypeCounts((prev) => {
+      if (!prev.messageMention && !prev.message_mention) return prev;
+      const next = { ...prev };
+      delete next.messageMention;
+      delete next.message_mention;
+      return next;
+    });
+    try {
+      await messageService.markAllAsRead();
+    } catch (error) {
+      console.error("Error marking all messages as read:", error);
+      fetchUnreadMessageCount();
+      fetchUnreadNotificationCount();
+    }
+  }, [fetchUnreadMessageCount, fetchUnreadNotificationCount]);
+
   return (
     <div className="navbar glass-navbar sticky top-0 z-10">
       <div className="content-container flex justify-between items-center w-full">
@@ -370,8 +444,20 @@ const Navbar = () => {
               >
                 <NotificationBadge
                   variant="alert"
-                  count={unreadNotificationCount - messageMentionNotificationCount}
-                  title={buildNotificationTooltip(unreadNotificationCount - messageMentionNotificationCount, notificationTypeCounts, notificationTypeTeamCounts)}
+                  count={bellNotificationCount}
+                  interactive={bellNotificationCount > 0}
+                  title={
+                    bellNotificationCount > 0
+                      ? withMarkAllRead(
+                          buildNotificationTooltip(
+                            bellNotificationCount,
+                            notificationTypeCounts,
+                            notificationTypeTeamCounts,
+                          ),
+                          handleMarkAllNotificationsRead,
+                        )
+                      : undefined
+                  }
                 >
                   <Bell size={22} strokeWidth={2.2} />
                 </NotificationBadge>
@@ -387,7 +473,20 @@ const Navbar = () => {
                 <NotificationBadge
                   variant="message"
                   count={unreadMessageCount}
-                  title={buildMessageTooltip(unreadMessageCount, messageTeamCount, messageSenderCount, messageMentionNotificationCount)}
+                  interactive={hasChatActivity}
+                  title={
+                    hasChatActivity
+                      ? withMarkAllRead(
+                          buildMessageTooltip(
+                            unreadMessageCount,
+                            messageTeamCount,
+                            messageSenderCount,
+                            messageMentionNotificationCount,
+                          ),
+                          handleMarkAllMessagesRead,
+                        )
+                      : undefined
+                  }
                 >
                   <MessageCircle size={22} strokeWidth={2.2} />
                 </NotificationBadge>
