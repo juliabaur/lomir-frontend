@@ -8,6 +8,12 @@ import {
   isArchivedTeamData,
 } from "../utils/chatHelpers";
 
+// How often the active team chat re-checks membership. The socket is the
+// primary signal, so a live connection only needs a slow safety net; without
+// one the poll goes back to being the only way a revocation is noticed.
+const CONNECTED_MEMBERSHIP_POLL_MS = 60000;
+const DISCONNECTED_MEMBERSHIP_POLL_MS = 10000;
+
 // Team-chat access + membership helpers extracted from Chat.jsx (Stage 5a).
 // Owns team-details fetching, access revocation, live membership refresh, and
 // conversation hydration. These helpers are consumed both here (send/edit/delete
@@ -217,8 +223,11 @@ const useChatTeamAccess = ({
 
     const teamId = activeConversation.team.id;
     let cancelled = false;
+    let lastCheckedAt = 0;
 
     const checkMembership = async () => {
+      lastCheckedAt = Date.now();
+
       try {
         if (!cancelled) {
           await refreshActiveTeamMembership(teamId);
@@ -228,8 +237,29 @@ const useChatTeamAccess = ({
       }
     };
 
+    // Membership loss already arrives over the socket (team:member_kicked is
+    // emitted straight to the removed user, team:member_left to the team room),
+    // and every send/edit/delete re-checks access before acting. This poll is
+    // the fallback for events missed while the socket was down, so it only
+    // needs to run often when there is no socket to miss them on.
+    const tick = () => {
+      const connected = socketService.getSocket()?.connected ?? false;
+      const dueAfter = connected
+        ? CONNECTED_MEMBERSHIP_POLL_MS
+        : DISCONNECTED_MEMBERSHIP_POLL_MS;
+
+      if (Date.now() - lastCheckedAt >= dueAfter) {
+        checkMembership();
+      }
+    };
+
     checkMembership();
-    const intervalId = window.setInterval(checkMembership, 10000);
+    // Ticking at the shorter cadence keeps the poll responsive to the socket
+    // dropping; the tick itself is a timestamp comparison and does not fetch.
+    const intervalId = window.setInterval(
+      tick,
+      DISCONNECTED_MEMBERSHIP_POLL_MS,
+    );
 
     const handleFocus = () => {
       checkMembership();

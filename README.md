@@ -254,6 +254,8 @@ Lomir-frontend/
 │   │   ├── useSocketEvents.js      # Subscribe to a set of Socket.IO events with React-safe cleanup
 │   │   ├── useChatTyping.js        # Chat typing indicator state, timeout cleanup, and user-name resolution
 │   │   ├── useChatSocketEvents.js  # Chat Socket.IO event wiring for messages, read status, membership, and conversation updates
+│   │   ├── useChatTeamAccess.js    # Team-chat access: details fetching, access revocation, and membership refresh (polled every 60 s while the socket is connected, every 10 s without it, plus on window focus)
+│   │   ├── useChatMessageActions.js # Chat send/edit/delete handlers, reply state wiring, and the confirmable chat actions (leave team, delete conversation/message)
 │   │   ├── useChatSearchState.js   # Chat search query state, message indexing, filtering, and no-result feedback
 │   │   ├── useActiveChatConversation.js # Active chat loading, join/read marking, highlights, and earlier-message pagination
 │   │   ├── useAwardModals.js       # Badge award modal state management (user profile context)
