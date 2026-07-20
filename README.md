@@ -35,7 +35,7 @@ To test the live demo, just **register your own account** directly in the deploy
 - **User Profiles** — Customizable profiles with interest tags, badges, avatar uploads (ImageKit), and geocoded location; profile header shows city and country code; non-public profiles are protected — non-owners and non-teammates see only the username and avatar ("This profile is private"); owners see public/private visibility indicators on profile, card, list, mini-card, and map views; signed-in users can block another profile from the user details modal
 - **Real-Time Chat** — Direct and team group messaging with typing indicators, read receipts, file/image sharing, @mentions, reply threading, and rich system event messages (Socket.IO); blocked users are hidden from direct conversations, team rosters, mention lists, and rendered message streams
 - **Badge System** — Browse 30 badges across 5 color-coded categories; award badges to teammates with reasons and team context
-- **Notifications** — In-app notification center for invitations, applications, badge awards, and role updates
+- **Notifications** — Navbar bell and chat badges with interactive hover tooltips that summarize unread items by type; clear everything behind a badge in one click, or click a type-group to work through its notifications from oldest to newest; notifications whose target was already handled by someone else resolve with an explanation instead of opening an empty view
 - **Account Deletion** — Multi-step account deletion with impact preview, automatic team ownership transfer, and graceful "Former Lomir User" handling across chat, badges, and notifications
 - **Demo Data Indicators** — Synthetic/seed data is visually labeled with FlaskConical icons and "DEMO" avatar overlays so users can distinguish test content from real data
 - **Contact Page** — Email contact form with optional multipart file attachments (up to 3 files, 5 MB each, 10 MB total — JPG, PNG, WebP, PDF, TXT, CSV); authenticated users with a configured contact user ID are routed directly to in-app chat instead; optional Turnstile CAPTCHA; privacy disclosure with `/privacy` link at submission; abuse/content reports show a persistent reference ID after submit
@@ -402,6 +402,27 @@ The chat page supports both direct (1-to-1) and team group conversations.
 **Render resilience**
 - Chat routes are wrapped in a small `ErrorBoundary` so unexpected render errors show a visible fallback instead of a blank white screen
 - Individual message bubbles are also isolated by an error boundary; if a legacy message payload fails to render, the rest of the conversation remains usable
+
+---
+
+## Notifications
+
+The navbar carries two badges: a bell for general notifications (invitations, applications, badge awards, role lifecycle events) and a chat icon for unread messages and @mentions. Hovering either one opens an interactive tooltip that stays open while the pointer is inside it.
+
+**Mark all as read**
+- The first row of both tooltips clears everything behind that badge in one click
+- The bell clears all general notifications; the chat icon clears every conversation (direct and team) plus pending @mention alerts, which also zeroes the unread badges in the chat page conversation list
+- Both clear optimistically and re-sync from the server if the request fails
+
+**Working through notifications selectively**
+- Below the divider, the bell tooltip lists unread notifications grouped by type
+- Clicking a group navigates to that group's oldest unread notification and marks it read, so the group counter drops by one; clicking again steps to the next-oldest, letting you work through them in your own order
+- Navigation targets come from the unread-count response (`typeFirstUnread`), so they stay correct no matter how old a notification is
+
+**Stale notifications**
+- A notification can go stale while still unread — for example a team application that another admin has meanwhile approved or declined
+- Opening one shows an explanatory message instead of an empty or non-highlighting modal, and the modal closes when nothing else is left to review
+- The backend also removes invitation notifications once the invitation is accepted, declined, or withdrawn, so resolved invites disappear from the bell on their own
 
 ---
 
