@@ -309,6 +309,16 @@ export const messageService = {
     return _pendingUnreadCount;
   },
 
+  // Mark every conversation (direct + team) as read for the current user.
+  // The backend also emits a "messages:read-all" socket event so the Navbar
+  // badges and the chat page's conversation list update in real time.
+  markAllAsRead: () =>
+    call("marking all messages as read", () =>
+      api.put("/api/messages/read-all", undefined, {
+        skipResponseCaseTransform: true,
+      }),
+    ),
+
   getConversationById: (conversationId, type = "direct") =>
     call(`fetching conversation ${conversationId}`, () =>
       api.get(`/api/messages/conversations/${conversationId}?type=${type}`, {

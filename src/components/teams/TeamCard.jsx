@@ -2303,6 +2303,7 @@ const TeamCard = ({
             teamName={teamData.name}
             highlightApplicationId={highlightApplicationId}
             highlightUserId={highlightApplicantId}
+            applicationsLoaded={pendingApplicationsLoaded}
           />
         )}
 
@@ -2628,6 +2629,7 @@ const TeamCard = ({
           teamName={teamData.name}
           highlightApplicationId={highlightApplicationId}
           highlightUserId={highlightApplicantId}
+          applicationsLoaded={pendingApplicationsLoaded}
         />
       )}
 

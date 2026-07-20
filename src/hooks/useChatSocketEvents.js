@@ -471,7 +471,20 @@ const useChatSocketEvents = ({
       }
     };
 
+    // Fired when the user hits "Mark all as read" in the navbar: every
+    // conversation's unread badge drops to zero across the list.
+    const handleAllMessagesRead = () => {
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          (conversation.unreadCount ?? conversation.unread_count ?? 0) > 0
+            ? { ...conversation, unreadCount: 0, unread_count: 0 }
+            : conversation,
+        ),
+      );
+    };
+
     socket.on("users:online", handleOnlineUsers);
+    socket.on("messages:read-all", handleAllMessagesRead);
     socket.on("message:received", handleNewMessage);
     socket.on("typing:update", handleTypingUpdate);
     socket.on("message:status", handleMessageStatus);
@@ -485,6 +498,7 @@ const useChatSocketEvents = ({
 
     return () => {
       socket.off("users:online", handleOnlineUsers);
+      socket.off("messages:read-all", handleAllMessagesRead);
       socket.off("message:received", handleNewMessage);
       socket.off("typing:update", handleTypingUpdate);
       socket.off("message:status", handleMessageStatus);

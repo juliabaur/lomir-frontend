@@ -50,6 +50,7 @@ const TeamApplicationsModal = ({
   teamName,
   highlightApplicationId = null,
   highlightUserId = null,
+  applicationsLoaded = false,
 }) => {
   // ============ Auth ============
   const { user: currentUser } = useAuth();
@@ -82,6 +83,8 @@ const TeamApplicationsModal = ({
 
   // ============ Refs ============
   const highlightedRef = useRef(null);
+  // Guards the stale-notification toast so it fires at most once per open.
+  const staleNotifiedRef = useRef(false);
 
   // ============ Handlers ============
   const handleResponseChange = (applicationId, response) => {
@@ -307,8 +310,44 @@ const TeamApplicationsModal = ({
     if (!isOpen) {
       setStatusUpdatingRoleId(null);
       setRoleStatusOverrides({});
+      staleNotifiedRef.current = false;
     }
   }, [isOpen]);
+
+  // A notification opened this modal for a specific application, but it is no
+  // longer pending (another admin already handled it in the meantime). Tell the
+  // user instead of leaving them on an empty / non-highlighting modal, and close
+  // the modal when there is nothing else to review.
+  useEffect(() => {
+    if (!isOpen || !applicationsLoaded || staleNotifiedRef.current) return;
+    if (highlightApplicationId == null && highlightUserId == null) return;
+
+    const targetStillPending = applications.some(
+      (application) =>
+        (highlightApplicationId != null &&
+          String(application.id) === String(highlightApplicationId)) ||
+        (highlightUserId != null &&
+          String(getRequestUserId(application, "applicant")) ===
+            String(highlightUserId)),
+    );
+
+    if (!targetStillPending) {
+      staleNotifiedRef.current = true;
+      showToast(
+        "The application you were notified about has already been handled.",
+        "info",
+      );
+      if (applications.length === 0) onClose();
+    }
+  }, [
+    isOpen,
+    applicationsLoaded,
+    highlightApplicationId,
+    highlightUserId,
+    applications,
+    showToast,
+    onClose,
+  ]);
 
   // ============ Render ============
   const anyNarrow = Object.values(narrowMap).some(Boolean);
