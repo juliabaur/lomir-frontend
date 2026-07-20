@@ -71,6 +71,7 @@ const NotificationBadge = ({
   title,
   showZero = false,
   compact = false,
+  interactive = false,
 }) => {
   const config = VARIANTS[variant];
   const shouldShowBadge = count > 0 || showZero;
@@ -80,7 +81,7 @@ const NotificationBadge = ({
     const tooltipText =
       title || (shouldShowBadge ? config?.getTitle(count) : undefined);
     return (
-      <Tooltip content={tooltipText}>
+      <Tooltip content={tooltipText} interactive={interactive}>
         <div
           className={`relative inline-flex ${className}`}
           onClick={onClick}

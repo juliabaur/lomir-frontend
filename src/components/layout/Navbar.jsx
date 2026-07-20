@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Award,
   Bell,
+  CheckCheck,
   CircleX,
   Crown,
   LogOut,
@@ -80,7 +81,7 @@ const NOTIFICATION_TYPE_META = [
   { keys: ["roleStatusChangedInvitee",   "role_status_changed_invitee"],   Icon: Pencil,        text: (p, n)     => `${p(n, "role")} you were invited to changed` },
 ];
 
-const buildNotificationTooltip = (count, types, teamCounts) => {
+const buildNotificationTooltip = (count, types, teamCounts, onGroupClick) => {
   if (!count || !types) return undefined;
   const p = (n, s) => `${n} ${s}${n !== 1 ? "s" : ""}`;
   const typeCount = (...keys) =>
@@ -91,26 +92,61 @@ const buildNotificationTooltip = (count, types, teamCounts) => {
   const lines = NOTIFICATION_TYPE_META.map(({ keys, Icon, text }) => {
     const n = typeCount(...keys);
     const tc = typeTeamCount(...keys);
-    return n ? { Icon, label: text(p, n, tc) } : null;
+    return n ? { keys, Icon, label: text(p, n, tc) } : null;
   }).filter(Boolean);
 
   if (!lines.length) return `${p(count, "notification")}`;
 
+  // Each type-group is a button: clicking it jumps to that group's oldest unread
+  // notification. Hover shifts to the lighter primary green.
   return (
-    <div className="flex flex-col gap-1">
-      {lines.map(({ Icon: NotificationIcon, label }, i) => (
-        <div key={i} className="flex items-center gap-1.5">
+    <div className="flex flex-col gap-0.5">
+      {lines.map(({ keys, Icon: NotificationIcon, label }, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onGroupClick?.(keys);
+          }}
+          className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[var(--color-primary-focus)] transition-colors hover:text-[var(--color-primary)]"
+        >
           {React.createElement(NotificationIcon, {
             size: 11,
             strokeWidth: 2.5,
             className: "flex-shrink-0 opacity-70",
           })}
           <span>{label}</span>
-        </div>
+        </button>
       ))}
     </div>
   );
 };
+
+// Wraps a badge's tooltip summary with a clickable "Mark all as read" action at
+// the top. The tooltip must be interactive (pointer-events enabled) for this.
+const withMarkAllRead = (summary, onMarkAll) => (
+  <div className="flex min-w-[150px] flex-col">
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onMarkAll();
+      }}
+      className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-semibold text-[var(--color-primary-focus)] transition-colors hover:text-[var(--color-primary)]"
+    >
+      <CheckCheck size={12} strokeWidth={2.5} className="flex-shrink-0" />
+      <span>Mark all as read</span>
+    </button>
+    <div className="mt-2 border-t border-base-300 pt-2">
+      {typeof summary === "string" ? (
+        <span className="whitespace-pre-line">{summary}</span>
+      ) : (
+        summary
+      )}
+    </div>
+  </div>
+);
 
 const Navbar = () => {
   const { isAuthenticated, user, logout } = useAuth();
@@ -126,6 +162,11 @@ const Navbar = () => {
   const [firstUnreadNotification, setFirstUnreadNotification] = useState(null);
   const [notificationTypeCounts, setNotificationTypeCounts] = useState({});
   const [notificationTypeTeamCounts, setNotificationTypeTeamCounts] = useState({});
+  // Oldest unread notification per type ({ [type]: { id, createdAt, navigateTo } }),
+  // so a tooltip type-group can jump straight to its oldest entry.
+  const [notificationTypeFirstUnread, setNotificationTypeFirstUnread] = useState(
+    {},
+  );
   const location = useLocation();
   const navigate = useNavigate();
   const lastMessageFetchRef = useRef(0);
@@ -142,6 +183,13 @@ const Navbar = () => {
     notificationTypeCounts.messageMention ||
     notificationTypeCounts.message_mention ||
     0;
+  // The bell badge excludes @mentions (those surface on the chat icon).
+  const bellNotificationCount =
+    unreadNotificationCount - messageMentionNotificationCount;
+  // The chat icon has something to clear when there are unread messages or
+  // pending @mention alerts.
+  const hasChatActivity =
+    unreadMessageCount > 0 || messageMentionNotificationCount > 0;
 
   // Fetch unread message count
   const fetchUnreadMessageCount = useCallback(async () => {
@@ -158,7 +206,9 @@ const Navbar = () => {
     }
   }, [isAuthenticated]);
 
-  // Fetch unread notification count
+  // Fetch unread notification count. The response also carries the oldest
+  // unread notification per type, which feeds the per-group navigation targets
+  // in the bell tooltip.
   const fetchUnreadNotificationCount = useCallback(async () => {
     if (!isAuthenticated) return;
 
@@ -168,6 +218,7 @@ const Navbar = () => {
       setFirstUnreadNotification(response.data?.firstUnread || null);
       setNotificationTypeCounts(response.data?.typeCounts || {});
       setNotificationTypeTeamCounts(response.data?.typeTeamCounts || {});
+      setNotificationTypeFirstUnread(response.data?.typeFirstUnread || {});
     } catch (error) {
       console.error("Error fetching unread notification count:", error);
     }
@@ -242,6 +293,7 @@ const Navbar = () => {
       setFirstUnreadNotification(null);
       setNotificationTypeCounts({});
       setNotificationTypeTeamCounts({});
+      setNotificationTypeFirstUnread({});
       return;
     }
 
@@ -349,6 +401,112 @@ const Navbar = () => {
     }
   };
 
+  // Mark all general (bell) notifications as read. Clears the badge + tooltip
+  // optimistically, then persists; re-syncs from the server on failure.
+  const handleMarkAllNotificationsRead = useCallback(async () => {
+    setUnreadNotificationCount(0);
+    setFirstUnreadNotification(null);
+    setNotificationTypeCounts({});
+    setNotificationTypeTeamCounts({});
+    setNotificationTypeFirstUnread({});
+    try {
+      await notificationService.markAllAsRead();
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
+      fetchUnreadNotificationCount();
+    }
+  }, [fetchUnreadNotificationCount]);
+
+  // Click a tooltip type-group: jump to its OLDEST unread notification, mark it
+  // read (so the group counter drops by one), and step to the next-oldest on the
+  // next click. Optimistic; reconciles with the server after navigation.
+  const handleNotificationGroupClick = useCallback(
+    async (keys) => {
+      // A group can span several types (e.g. role_reopened + role_reopened_admin);
+      // pick the oldest entry across the ones present.
+      const target = keys
+        .map((key) =>
+          notificationTypeFirstUnread[key]
+            ? { type: key, ...notificationTypeFirstUnread[key] }
+            : null,
+        )
+        .filter(Boolean)
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        )[0];
+
+      if (!target) {
+        // Map is stale (nothing left for this group locally) — refresh and let
+        // the user click again.
+        fetchUnreadNotificationCount();
+        return;
+      }
+
+      // Optimistically drop this one so the counter falls and a quick repeat
+      // click does not re-target the same (now read) notification.
+      setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
+      setNotificationTypeCounts((prev) => {
+        const current = Number(prev[target.type]) || 0;
+        if (current <= 0) return prev;
+        return { ...prev, [target.type]: current - 1 };
+      });
+      setNotificationTypeFirstUnread((prev) => {
+        if (!prev[target.type]) return prev;
+        const next = { ...prev };
+        delete next[target.type];
+        return next;
+      });
+
+      try {
+        await notificationService.markAsRead(target.id);
+      } catch (error) {
+        console.error("Error marking notification as read:", error);
+      }
+
+      navigate(target.navigateTo || "/teams/my-teams");
+
+      // Reconcile counts + per-type targets with the server (repopulates the
+      // next-oldest for this type) once navigation settles.
+      setTimeout(() => {
+        fetchUnreadNotificationCount();
+      }, 1000);
+    },
+    [notificationTypeFirstUnread, navigate, fetchUnreadNotificationCount],
+  );
+
+  // Mark every conversation (direct + team) as read, plus @mention alerts. The
+  // backend also emits messages:read-all so the chat page's conversation list
+  // clears. We drop the local badge/tooltip immediately for instant feedback.
+  const handleMarkAllMessagesRead = useCallback(async () => {
+    setUnreadMessageCount(0);
+    setFirstUnreadMessage(null);
+    setMessageTeamCount(0);
+    setMessageSenderCount(0);
+    // The mention line on the chat tooltip is fed by notification counts; drop
+    // it locally too (the backend marks those notifications read).
+    setNotificationTypeCounts((prev) => {
+      if (!prev.messageMention && !prev.message_mention) return prev;
+      const next = { ...prev };
+      delete next.messageMention;
+      delete next.message_mention;
+      return next;
+    });
+    setNotificationTypeFirstUnread((prev) => {
+      if (!prev.message_mention) return prev;
+      const next = { ...prev };
+      delete next.message_mention;
+      return next;
+    });
+    try {
+      await messageService.markAllAsRead();
+    } catch (error) {
+      console.error("Error marking all messages as read:", error);
+      fetchUnreadMessageCount();
+      fetchUnreadNotificationCount();
+    }
+  }, [fetchUnreadMessageCount, fetchUnreadNotificationCount]);
+
   return (
     <div className="navbar glass-navbar sticky top-0 z-10">
       <div className="content-container flex justify-between items-center w-full">
@@ -370,8 +528,21 @@ const Navbar = () => {
               >
                 <NotificationBadge
                   variant="alert"
-                  count={unreadNotificationCount - messageMentionNotificationCount}
-                  title={buildNotificationTooltip(unreadNotificationCount - messageMentionNotificationCount, notificationTypeCounts, notificationTypeTeamCounts)}
+                  count={bellNotificationCount}
+                  interactive={bellNotificationCount > 0}
+                  title={
+                    bellNotificationCount > 0
+                      ? withMarkAllRead(
+                          buildNotificationTooltip(
+                            bellNotificationCount,
+                            notificationTypeCounts,
+                            notificationTypeTeamCounts,
+                            handleNotificationGroupClick,
+                          ),
+                          handleMarkAllNotificationsRead,
+                        )
+                      : undefined
+                  }
                 >
                   <Bell size={22} strokeWidth={2.2} />
                 </NotificationBadge>
@@ -387,7 +558,20 @@ const Navbar = () => {
                 <NotificationBadge
                   variant="message"
                   count={unreadMessageCount}
-                  title={buildMessageTooltip(unreadMessageCount, messageTeamCount, messageSenderCount, messageMentionNotificationCount)}
+                  interactive={hasChatActivity}
+                  title={
+                    hasChatActivity
+                      ? withMarkAllRead(
+                          buildMessageTooltip(
+                            unreadMessageCount,
+                            messageTeamCount,
+                            messageSenderCount,
+                            messageMentionNotificationCount,
+                          ),
+                          handleMarkAllMessagesRead,
+                        )
+                      : undefined
+                  }
                 >
                   <MessageCircle size={22} strokeWidth={2.2} />
                 </NotificationBadge>
